@@ -147,8 +147,12 @@ function startDownload(id) {
   const dl = store.downloads.get(id);
   if (!dl) return;
 
-  const cfg    = loadConfig();
-  const folder = cfg.downloadFolder;
+  const cfg        = loadConfig();
+  const today      = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const typeDir    = dl.format === 'audio' ? 'Music' : 'Video';
+  const folder     = cfg.organizeByType !== false
+    ? path.join(cfg.downloadFolder, typeDir, today)
+    : cfg.downloadFolder;
   fs.mkdirSync(folder, { recursive: true });
 
   const args = [

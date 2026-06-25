@@ -10,10 +10,11 @@ function loadConfig() {
   try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); }
   catch {
     return {
-      downloadFolder: path.join(os.homedir(), 'Downloads', 'VDL'),
+      downloadFolder: path.join(os.homedir(), 'Downloads', 'SP-Downloader'),
       cookiesFrom:    'none',
       cookiesFile:    '',
       proxy:          '',
+      organizeByType: true,
     };
   }
 }

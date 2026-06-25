@@ -1,12 +1,26 @@
 /* ══ Theme Logic ══════════════════════════════════════════════════════════════ */
-const themeQuery = window.matchMedia('(prefers-color-scheme: dark)');
-function handleThemeChange(e) {
+const THEME_KEY = 'vdl-theme';
+
+function applyTheme(theme) {
+  if (theme === 'dark' || theme === 'light') {
+    document.documentElement.setAttribute('data-theme', theme);
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+  wiggleTheme();
+}
+
+function wiggleTheme() {
   document.body.classList.remove('theme-wiggle');
-  void document.body.offsetWidth; // Trigger reflow
+  void document.body.offsetWidth;
   document.body.classList.add('theme-wiggle');
   setTimeout(() => document.body.classList.remove('theme-wiggle'), 700);
 }
-themeQuery.addEventListener('change', handleThemeChange);
+
+// System theme change only fires a wiggle when in "auto" mode
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (!localStorage.getItem(THEME_KEY) || localStorage.getItem(THEME_KEY) === 'auto') wiggleTheme();
+});
 
 /* ══ State ════════════════════════════════════════════════════════════════════ */
 const MAX_PREVIEWS = 5;
@@ -76,15 +90,19 @@ async function loadDownloads() {
     setCollection('history', res.history || []);
     renderDownloads();
   } catch (e) {
-    toast('بارگذاری تاریخچه ناموفق بود: ' + e.message, 4000);
+    toast(`<i class="fa-solid fa-triangle-exclamation"></i> بارگذاری تاریخچه ناموفق بود: ${escHtml(e.message)}`, 4000);
   }
 }
 
 /* ══ Toast ════════════════════════════════════════════════════════════════════ */
-function toast(msg, duration = 3000) {
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function toast(html, duration = 3000) {
   const el = document.createElement('div');
   el.className = 'toast';
-  el.textContent = msg;
+  el.innerHTML = html;
   $('toastWrap').appendChild(el);
   setTimeout(() => {
     el.classList.add('out');
@@ -368,10 +386,10 @@ async function startPreviewDownload(pid) {
       quality: sel.value,
     });
     if (!res.ok) throw new Error(res.error);
-    toast('دانلود شروع شد 🚀');
+    toast('<i class="fa-solid fa-rocket"></i> دانلود شروع شد');
     removePreview(pid);             // frees a capacity slot, re-enables search bar
   } catch (e) {
-    toast('خطا: ' + e.message);
+    toast(`<i class="fa-solid fa-circle-exclamation"></i> خطا: ${escHtml(e.message)}`);
     btn.disabled = false;
     btn.innerHTML = originalHtml;
   }
@@ -726,8 +744,8 @@ window.saveFile = async (key) => {
     a.click();
     URL.revokeObjectURL(a.href);
     a.remove();
-    toast('فایل ذخیره شد ✅');
-  } catch (e) { toast('خطا: ' + e.message); }
+    toast('<i class="fa-solid fa-check"></i> فایل ذخیره شد');
+  } catch (e) { toast(`<i class="fa-solid fa-circle-exclamation"></i> خطا: ${escHtml(e.message)}`); }
   finally { if (btn) { btn.innerHTML = originalHtml; btn.disabled = false; } }
 };
 
@@ -739,7 +757,7 @@ window.openFolder = key => {
 window.cancelDl = async key => {
   const dl = getDownloadByKey(key);
   await api('/api/cancel', { id: dl?.id, sessionId: dl?.sessionId || key });
-  toast('دانلود لغو شد');
+  toast('<i class="fa-solid fa-xmark"></i> دانلود لغو شد');
 };
 
 window.removeDl = async key => {
@@ -761,18 +779,37 @@ window.retryDl = async key => {
     delete state.history[key];
     state.downloads[key] = { ...dl, status: 'downloading', speed: '', eta: '', errorMsg: '' };
     applyScope('active');
-    toast('در حال ادامه و تعمیر دانلود... 🔄');
+    toast('<i class="fa-solid fa-rotate"></i> در حال ادامه و تعمیر دانلود...');
   } catch (e) {
-    toast('خطا: ' + e.message);
+    toast(`<i class="fa-solid fa-circle-exclamation"></i> خطا: ${escHtml(e.message)}`);
   }
 };
 
 /* ══ Header Buttons ══════════════════════════════════════════════════════════ */
 $('folderBtn').addEventListener('click', () => api('/api/open-folder', {}));
+// Theme button clicks (inside settings modal)
+document.querySelectorAll('.theme-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const theme = btn.dataset.theme;
+    document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    localStorage.setItem(THEME_KEY, theme);
+    applyTheme(theme);
+  });
+});
+
 $('settingsBtn').addEventListener('click', async () => {
   const cfg = await api('/api/config');
-  $('cfgFolder').value = cfg.downloadFolder || '';
-  $('cfgProxy').value  = cfg.proxy          || '';
+  $('cfgFolder').value    = cfg.downloadFolder || '';
+  $('cfgProxy').value     = cfg.proxy          || '';
+  $('cfgOrganize').checked = cfg.organizeByType !== false; // default on
+
+  // Highlight active theme button
+  const currentTheme = localStorage.getItem(THEME_KEY) || 'auto';
+  document.querySelectorAll('.theme-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.theme === currentTheme);
+  });
+
   $('settingsOverlay').classList.add('show');
 });
 $('settingsClose').addEventListener('click', () => $('settingsOverlay').classList.remove('show'));
@@ -783,9 +820,10 @@ $('settingsSave').addEventListener('click', async () => {
   await api('/api/config', {
     downloadFolder: $('cfgFolder').value.trim(),
     proxy:          $('cfgProxy').value.trim(),
+    organizeByType: $('cfgOrganize').checked,
   });
   $('settingsOverlay').classList.remove('show');
-  toast('تنظیمات ذخیره شد ✅');
+  toast('<i class="fa-solid fa-check"></i> تنظیمات ذخیره شد');
 });
 
 $('proxyTestBtn').addEventListener('click', async () => {
@@ -873,13 +911,13 @@ async function performYtdlpUpdate(master = false) {
   try {
     const res = await api('/api/admin/update-ytdlp', { master }, { 'Authorization': state.adminPass });
     if (!res.ok) throw new Error(res.error);
-    status.textContent = `✅ با موفقیت آپدیت شد! نسخه: ${res.version}`;
+    status.textContent = `نسخه جدید: ${res.version}`;
     status.style.color = 'var(--success)';
-    toast('هسته با موفقیت به‌روزرسانی شد ✅');
+    toast('<i class="fa-solid fa-check"></i> هسته با موفقیت به‌روزرسانی شد');
   } catch (e) {
-    status.textContent = `❌ خطا در آپدیت: ${e.message}`;
+    status.textContent = `خطا در آپدیت: ${e.message}`;
     status.style.color = 'var(--error)';
-    toast('خطا در به‌روزرسانی هسته');
+    toast('<i class="fa-solid fa-triangle-exclamation"></i> خطا در به‌روزرسانی هسته');
   } finally {
     btn.disabled = false;
     btn.innerHTML = originalHtml;

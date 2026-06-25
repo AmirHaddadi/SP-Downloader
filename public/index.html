@@ -3,7 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>VDL — دانلودر ویدئو</title>
+<title>SP Downloader — دانلودر ویدئو</title>
+<script>(function(){var t=localStorage.getItem('vdl-theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);})()</script>
+<link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg">
+<link rel="icon" type="image/png" sizes="96x96" href="/favicon/favicon-96x96.png">
+<link rel="icon" href="/favicon/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+<link rel="manifest" href="/favicon/site.webmanifest">
 <link rel="stylesheet" href="/fontawesome/css/all.min.css">
 <link rel="stylesheet" href="style.css">
 <script src="app.js" defer></script>
@@ -18,8 +24,8 @@
         <img src="Logo.png" alt="Logo">
       </div>
       <div>
-        <div class="logo-name">VDL</div>
-        <div class="logo-sub">Video Downloader Pro</div>
+        <div class="logo-name">SP Downloader</div>
+        <div class="logo-sub">آزادی در دانلود</div>
       </div>
     </div>
     <div class="header-btns">
@@ -146,9 +152,26 @@
     </div>
     <div class="modal-body">
       <div class="field-group">
+        <div class="field-label"><i class="fa-solid fa-palette"></i> تم رنگی</div>
+        <div class="theme-picker">
+          <button class="theme-btn" data-theme="auto"><i class="fa-solid fa-circle-half-stroke"></i><span>خودکار</span></button>
+          <button class="theme-btn" data-theme="light"><i class="fa-solid fa-sun"></i><span>روشن</span></button>
+          <button class="theme-btn" data-theme="dark"><i class="fa-solid fa-moon"></i><span>تیره</span></button>
+        </div>
+      </div>
+      <div class="field-group">
         <div class="field-label"><i class="fa-solid fa-folder"></i> پوشه ذخیره‌سازی</div>
-        <input class="field-input" id="cfgFolder" type="text" placeholder="C:\Users\...\Downloads\VDL" dir="ltr">
-        <div class="field-hint">مسیر کامل پوشه برای ذخیره فایل‌های دانلود شده</div>
+        <input class="field-input" id="cfgFolder" type="text" placeholder="C:\Users\...\Downloads\SP-Downloader" dir="ltr">
+        <div class="field-hint">مسیر پوشه اصلی برای ذخیره دانلودها</div>
+      </div>
+      <div class="field-group">
+        <div class="field-label"><i class="fa-solid fa-folder-tree"></i> سازماندهی خودکار</div>
+        <label class="toggle-row">
+          <input type="checkbox" id="cfgOrganize" class="toggle-input">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span class="toggle-label">تفکیک موسیقی و ویدئو بر اساس تاریخ</span>
+        </label>
+        <div class="field-hint">دانلودها در زیرپوشه‌های <code>Video\YYYY-MM-DD</code> و <code>Music\YYYY-MM-DD</code> ذخیره می‌شن</div>
       </div>
       <div class="field-group">
         <div class="field-label"><i class="fa-solid fa-globe"></i> پروکسی <span class="field-label-opt">(اختیاری)</span></div>
@@ -169,6 +192,11 @@
 
 <!-- Toast -->
 <div class="toast-wrap" id="toastWrap"></div>
+
+<!-- Footer -->
+<footer class="app-footer">
+  ساخته شده با <i class="fa-solid fa-heart app-footer-heart"></i> توسط <strong>امیر حدادی</strong> — برای حمایت از آزادی در دانلود محتوا
+</footer>
 
 </body>
 </html>
