@@ -1,0 +1,25 @@
+{
+  "name": "sp-downloader",
+  "version": "1.0.0",
+  "description": "A simple local video downloader UI backed by yt-dlp.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "update-core": "node update-ytdlp.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "yt-dlp",
+    "video",
+    "downloader",
+    "vd1",
+    "sp-downloader"
+  ],
+  "author": "SP Downloader",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "mongodb": "^7.3.0"
+  }
+}

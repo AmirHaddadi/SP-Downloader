@@ -1,0 +1,5 @@
+claude.exe
+.claude/
+.vscode/
+node_modules/
+bin/

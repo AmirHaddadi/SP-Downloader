@@ -1,0 +1,890 @@
+/* ══ Theme Logic ══════════════════════════════════════════════════════════════ */
+const themeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+function handleThemeChange(e) {
+  document.body.classList.remove('theme-wiggle');
+  void document.body.offsetWidth; // Trigger reflow
+  document.body.classList.add('theme-wiggle');
+  setTimeout(() => document.body.classList.remove('theme-wiggle'), 700);
+}
+themeQuery.addEventListener('change', handleThemeChange);
+
+/* ══ State ════════════════════════════════════════════════════════════════════ */
+const MAX_PREVIEWS = 5;
+
+const state = {
+  downloads:    {},          // sessionId → active download
+  history:      {},          // sessionId → archived download
+  filter:       'all',
+  scope:        'active',
+  isAdmin:      false,
+  adminPass:    '',
+  format:       localStorage.getItem('vdl-fmt') || 'video',
+  quality:      JSON.parse(localStorage.getItem('vdl-quality') || '{}'),
+};
+
+// Each preview is fully independent: idle → loading → ready/error.
+const previews = new Map();   // pid → { pid, url, el, controller, meta, format }
+let previewSeq = 0;
+
+/* ══ DOM Refs ════════════════════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+const searchBar    = $('searchBar');
+const urlInput     = $('urlInput');
+const addBtn       = $('addBtn');
+const platformIcon = $('platformIcon');
+const searchHint   = $('searchHint');
+const previewGrid  = $('previewGrid');
+const dlList       = $('dlList');
+const scopeSwitch  = $('scopeSwitch');
+
+/* ══ API ══════════════════════════════════════════════════════════════════════ */
+async function api(path, body, extraHeaders = {}) {
+  const opts = {
+    method: body !== undefined ? 'POST' : 'GET',
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+function getDownloadKey(dl) {
+  return String(dl.sessionId || dl.id);
+}
+
+function sortByNewest(a, b) {
+  return (b.timestamp || 0) - (a.timestamp || 0);
+}
+
+function setCollection(target, items) {
+  const next = {};
+  (items || []).forEach(item => {
+    next[getDownloadKey(item)] = item;
+  });
+  state[target] = next;
+}
+
+function getDownloadByKey(key) {
+  return state.downloads[key] || state.history[key] || null;
+}
+
+async function loadDownloads() {
+  try {
+    const res = await api('/api/downloads');
+    if (!res.ok) throw new Error(res.error || 'خطا در دریافت دانلودها');
+    setCollection('downloads', res.active || []);
+    setCollection('history', res.history || []);
+    renderDownloads();
+  } catch (e) {
+    toast('بارگذاری تاریخچه ناموفق بود: ' + e.message, 4000);
+  }
+}
+
+/* ══ Toast ════════════════════════════════════════════════════════════════════ */
+function toast(msg, duration = 3000) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  $('toastWrap').appendChild(el);
+  setTimeout(() => {
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 260);
+  }, duration);
+}
+
+/* ══ Platform Detection (Font Awesome) ═══════════════════════════════════════ */
+const platforms = [
+  { cls: 'fa-brands fa-youtube',   re: /youtube\.com|youtu\.be/ },
+  { cls: 'fa-brands fa-tiktok',    re: /tiktok\.com/ },
+  { cls: 'fa-brands fa-instagram', re: /instagram\.com/ },
+  { cls: 'fa-brands fa-x-twitter', re: /twitter\.com|x\.com/ },
+  { cls: 'fa-brands fa-vimeo-v',   re: /vimeo\.com/ },
+  { cls: 'fa-brands fa-twitch',    re: /twitch\.tv/ },
+  { cls: 'fa-solid fa-film',       re: /dailymotion\.com|pornhub\.com/ },
+];
+function detectPlatform(url) {
+  for (const p of platforms) if (p.re.test(url)) return p.cls;
+  return 'fa-solid fa-link';
+}
+function platformIconHtml(url) {
+  return `<i class="${detectPlatform(url)}"></i>`;
+}
+
+/* ══ Search Bar ══════════════════════════════════════════════════════════════ */
+function normalizeUrl(url) {
+  return url.trim();
+}
+
+function isValidUrl(url) {
+  return /^https?:\/\//i.test(url);
+}
+
+function updateSearchAvailability() {
+  const full = previews.size >= MAX_PREVIEWS;
+  searchBar.classList.toggle('disabled', full);
+  urlInput.disabled = full;
+  addBtn.disabled = full;
+
+  if (full) {
+    searchHint.textContent = `به سقف ${MAX_PREVIEWS} پیش‌نمایش رسیدی. یکی را دانلود یا حذف کن تا ظرفیت آزاد شود.`;
+    searchHint.className = 'search-hint show warn';
+  } else if (previews.size > 0) {
+    searchHint.textContent = `${previews.size} از ${MAX_PREVIEWS} پیش‌نمایش`;
+    searchHint.className = 'search-hint show';
+  } else {
+    searchHint.textContent = '';
+    searchHint.className = 'search-hint';
+  }
+}
+
+function findPreviewByUrl(url) {
+  for (const pv of previews.values()) if (pv.url === url) return pv;
+  return null;
+}
+
+function flashSearchError(msg) {
+  searchBar.classList.remove('shake');
+  void searchBar.offsetWidth;
+  searchBar.classList.add('shake');
+  searchHint.textContent = msg;
+  searchHint.className = 'search-hint show error';
+  setTimeout(() => {
+    searchBar.classList.remove('shake');
+    updateSearchAvailability();
+  }, 2200);
+}
+
+function submitUrl() {
+  const url = normalizeUrl(urlInput.value);
+  if (!url) { urlInput.focus(); return; }
+  if (!isValidUrl(url)) { flashSearchError('URL باید با http:// یا https:// شروع شود'); return; }
+  if (previews.size >= MAX_PREVIEWS) { flashSearchError('ظرفیت پیش‌نمایش‌ها پر است'); return; }
+
+  const existing = findPreviewByUrl(url);
+  if (existing) {
+    flashSearchError('این لینک از قبل در پیش‌نمایش هست');
+    existing.el.classList.remove('pulse');
+    void existing.el.offsetWidth;
+    existing.el.classList.add('pulse');
+    return;
+  }
+
+  addPreview(url);
+  urlInput.value = '';
+  platformIcon.innerHTML = '<i class="fa-solid fa-link"></i>';
+  platformIcon.classList.remove('show');
+}
+
+urlInput.addEventListener('input', () => {
+  const url = urlInput.value.trim();
+  if (url) {
+    platformIcon.innerHTML = platformIconHtml(url);
+    platformIcon.classList.add('show');
+  } else {
+    platformIcon.classList.remove('show');
+  }
+});
+urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitUrl(); });
+addBtn.addEventListener('click', submitUrl);
+
+/* ══ Preview Cards (parallel, independent state) ═════════════════════════════ */
+function addPreview(url) {
+  const pid = ++previewSeq;
+  const pv = {
+    pid,
+    url,
+    format: state.format,
+    quality: { ...state.quality },
+    meta: null,
+    controller: new AbortController(),
+    el: null,
+  };
+  pv.el = buildPreviewCard(pv);
+  previews.set(pid, pv);
+  previewGrid.appendChild(pv.el);
+  // Force reflow so the entry animation always plays from scratch.
+  requestAnimationFrame(() => pv.el.classList.add('in'));
+  updateSearchAvailability();
+  fetchPreviewMeta(pv);
+}
+
+function buildPreviewCard(pv) {
+  const el = document.createElement('div');
+  el.className = 'pv-card';
+  el.dataset.state = 'loading';
+  el.dataset.pid = pv.pid;
+  el.innerHTML = `
+    <button class="pv-remove" title="حذف"><i class="fa-solid fa-xmark"></i></button>
+
+    <div class="pv-loading">
+      <div class="pv-thumb skeleton"></div>
+      <div class="pv-lines">
+        <div class="skeleton" style="height:16px;width:85%"></div>
+        <div class="skeleton" style="height:12px;width:55%"></div>
+        <div class="skeleton" style="height:34px;width:70%;margin-top:auto"></div>
+      </div>
+    </div>
+
+    <div class="pv-error">
+      <div class="pv-error-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+      <div class="pv-error-body">
+        <div class="pv-error-msg"></div>
+        <button class="btn btn-ghost pv-retry"><i class="fa-solid fa-rotate-right"></i><span>تلاش مجدد</span></button>
+      </div>
+    </div>
+
+    <div class="pv-ready">
+      <div class="pv-thumb">
+        <img class="pv-thumb-img" src="" alt="" style="display:none">
+        <span class="pv-thumb-icon"><i class="fa-solid fa-film"></i></span>
+      </div>
+      <div class="pv-info">
+        <div class="pv-title"></div>
+        <div class="pv-meta"></div>
+        <div class="pv-controls">
+          <div class="seg-control">
+            <button class="seg-btn" data-fmt="video"><i class="fa-solid fa-video"></i> ویدئو</button>
+            <button class="seg-btn" data-fmt="audio"><i class="fa-solid fa-music"></i> صدا</button>
+          </div>
+          <select class="quality-sel"></select>
+          <button class="btn btn-primary pv-download"><i class="fa-solid fa-download"></i><span>شروع دانلود</span></button>
+        </div>
+      </div>
+    </div>`;
+
+  el.querySelector('.pv-remove').addEventListener('click', () => removePreview(pv.pid));
+  el.querySelector('.pv-retry').addEventListener('click', () => retryPreview(pv.pid));
+  el.querySelector('.pv-download').addEventListener('click', () => startPreviewDownload(pv.pid));
+
+  el.querySelectorAll('.seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      pv.format = btn.dataset.fmt;
+      state.format = pv.format;
+      localStorage.setItem('vdl-fmt', pv.format);
+      updateCardFormat(pv);
+    });
+  });
+
+  el.querySelector('.quality-sel').addEventListener('change', e => {
+    pv.quality[pv.format] = e.target.value;
+    state.quality[pv.format] = e.target.value;
+    localStorage.setItem('vdl-quality', JSON.stringify(state.quality));
+  });
+
+  return el;
+}
+
+async function fetchPreviewMeta(pv) {
+  pv.el.dataset.state = 'loading';
+  try {
+    const res = await fetch('/api/meta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: pv.url }),
+      signal: pv.controller.signal,
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'خطا در دریافت اطلاعات');
+    pv.meta = data.meta;
+    renderPreviewReady(pv);
+  } catch (e) {
+    if (e.name === 'AbortError') return; // card removed mid-flight — do nothing
+    renderPreviewError(pv, e.message);
+  }
+}
+
+function renderPreviewReady(pv) {
+  const el = pv.el;
+  const m = pv.meta;
+  const img = el.querySelector('.pv-thumb-img');
+  const icon = el.querySelector('.pv-thumb-icon');
+  if (m.thumb) {
+    img.src = m.thumb;
+    img.style.display = 'block';
+    img.onerror = () => { img.style.display = 'none'; icon.style.display = ''; };
+    icon.style.display = 'none';
+  } else {
+    img.style.display = 'none';
+    icon.style.display = '';
+  }
+  el.querySelector('.pv-title').textContent = m.title;
+  const dur = m.duration ? `${Math.floor(m.duration / 60)}m ${m.duration % 60}s` : '';
+  el.querySelector('.pv-meta').textContent = [m.extractor, m.uploader, dur].filter(Boolean).join(' • ');
+  updateCardFormat(pv);
+  el.dataset.state = 'ready';
+}
+
+function renderPreviewError(pv, msg) {
+  pv.el.querySelector('.pv-error-msg').textContent = msg;
+  pv.el.dataset.state = 'error';
+}
+
+function updateCardFormat(pv) {
+  const el = pv.el;
+  el.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b.dataset.fmt === pv.format));
+  const sel = el.querySelector('.quality-sel');
+  const opts = pv.format === 'video' ? pv.meta?.videoQualities : pv.meta?.audioQualities;
+  if (!opts?.length) { sel.style.display = 'none'; return; }
+  sel.style.display = '';
+  sel.innerHTML = opts.map(q => `<option value="${q}">${q}</option>`).join('');
+  const saved = pv.quality[pv.format];
+  const dflt = pv.format === 'video' ? '480p' : '128kbps';
+  sel.value = (saved && opts.includes(saved)) ? saved : (opts.includes(dflt) ? dflt : opts[0]);
+}
+
+function retryPreview(pid) {
+  const pv = previews.get(pid);
+  if (!pv) return;
+  pv.controller = new AbortController();
+  fetchPreviewMeta(pv);
+}
+
+function removePreview(pid) {
+  const pv = previews.get(pid);
+  if (!pv) return;
+  pv.controller.abort();          // real cancel of any in-flight fetch
+  previews.delete(pid);
+  pv.el.classList.add('out');
+  pv.el.addEventListener('transitionend', () => pv.el.remove(), { once: true });
+  setTimeout(() => pv.el.remove(), 400); // fallback if transitionend never fires
+  updateSearchAvailability();
+}
+
+async function startPreviewDownload(pid) {
+  const pv = previews.get(pid);
+  if (!pv || !pv.meta) return;
+  const btn = pv.el.querySelector('.pv-download');
+  const sel = pv.el.querySelector('.quality-sel');
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>در حال شروع…</span>';
+
+  try {
+    const res = await api('/api/download', {
+      url:     pv.meta.webpage_url,
+      title:   pv.meta.title,
+      thumb:   pv.meta.thumb,
+      format:  pv.format,
+      quality: sel.value,
+    });
+    if (!res.ok) throw new Error(res.error);
+    toast('دانلود شروع شد 🚀');
+    removePreview(pid);             // frees a capacity slot, re-enables search bar
+  } catch (e) {
+    toast('خطا: ' + e.message);
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
+}
+
+/* ══ SSE ══════════════════════════════════════════════════════════════════════ */
+function connectSSE() {
+  const es = new EventSource('/events');
+  es.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'update') {
+      const key  = getDownloadKey(msg.download);
+      const prev = state.downloads[key];
+      const next = msg.download;
+      // Preserve locally-accumulated logs if this update doesn't carry them.
+      if (prev && prev.logs && (!next.logs || !next.logs.length)) next.logs = prev.logs;
+      state.downloads[key] = next;
+
+      // Structural change (new card or status transition) needs a full render —
+      // it affects counts, the action buttons, and which filter bucket the card
+      // belongs to. A plain progress tick is patched in place: no UI rebuild, so
+      // animations don't restart and the list doesn't glitch/jump.
+      const structural = !prev || prev.status !== next.status;
+      if (structural) {
+        renderDownloads();
+      } else {
+        patchDownloadCard(next); // no-op if the card isn't in the current view
+      }
+    }
+    if (msg.type === 'remove') {
+      if (msg.sessionId) delete state.downloads[msg.sessionId];
+      renderDownloads();
+    }
+    if (msg.type === 'history-upsert') {
+      const key = getDownloadKey(msg.download);
+      state.history[key] = msg.download;
+      delete state.downloads[key];
+      renderDownloads();
+    }
+    if (msg.type === 'history-remove') {
+      if (msg.sessionId) {
+        delete state.history[msg.sessionId];
+      } else if (msg.id !== undefined && msg.id !== null) {
+        const key = Object.keys(state.history).find(itemKey => state.history[itemKey]?.id === msg.id);
+        if (key) delete state.history[key];
+      }
+      renderDownloads();
+    }
+    if (msg.type === 'log') {
+      const dl = state.downloads[msg.sessionId];
+      if (dl) {
+        dl.logs = dl.logs || [];
+        dl.logs.push(msg.entry);
+        if (dl.logs.length > 20) dl.logs.shift();
+        appendLogToCard(msg.sessionId, msg.entry); // append-only, no rebuild
+      }
+    }
+  };
+  es.onerror = () => setTimeout(connectSSE, 2500);
+}
+connectSSE();
+
+/* ══ Tabs ════════════════════════════════════════════════════════════════════ */
+const tabConfig = {
+  active: [
+    { key: 'all', label: 'همه', countId: 'countAll' },
+    { key: 'downloading', label: 'در حال اجرا', countId: 'countDl' },
+    { key: 'queued', label: 'در صف', countId: 'countDone' },
+    { key: 'paused', label: 'متوقف', countId: 'countErr' },
+  ],
+  history: [
+    { key: 'all', label: 'همه', countId: 'countAll' },
+    { key: 'done', label: 'موفق', countId: 'countDl' },
+    { key: 'error', label: 'خطا', countId: 'countDone' },
+    { key: 'cancelled', label: 'لغو شده', countId: 'countErr' },
+  ],
+};
+
+const tabLabelIds = ['tabLabelAll', 'tabLabelTwo', 'tabLabelThree', 'tabLabelFour'];
+const tabs = Array.from(document.querySelectorAll('.tab'));
+
+function applyScope(scope) {
+  state.scope = scope;
+
+  const config = tabConfig[scope];
+  tabs.forEach((tab, index) => {
+    tab.dataset.filter = config[index].key;
+    $(tabLabelIds[index]).textContent = config[index].label;
+  });
+
+  if (!config.some(item => item.key === state.filter)) {
+    state.filter = 'all';
+  }
+
+  tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.filter === state.filter));
+  document.querySelectorAll('.scope-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.scope === scope);
+  });
+
+  renderDownloads();
+}
+
+document.querySelectorAll('.scope-btn').forEach(btn => {
+  btn.addEventListener('click', () => applyScope(btn.dataset.scope));
+});
+
+tabs.forEach(t => {
+  t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    state.filter = t.dataset.filter;
+    renderDownloads();
+  });
+});
+
+applyScope('active');
+loadDownloads();
+
+/* ══ Render Downloads ════════════════════════════════════════════════════════ */
+function renderDownloads() {
+  const active = Object.values(state.downloads).sort(sortByNewest);
+  const history = Object.values(state.history).sort(sortByNewest);
+  const allCount = active.length + history.length;
+  const historyDone = history.filter(d => d.status === 'done').length;
+
+  const statsBar = $('statsBar');
+  const tabsWrap = $('tabs');
+
+  $('scopeCountActive').textContent = active.length;
+  $('scopeCountHistory').textContent = history.length;
+
+  if (allCount > 0) {
+    statsBar.style.display = '';
+    scopeSwitch.style.display = '';
+    tabsWrap.style.display = '';
+    $('statCount').textContent  = allCount;
+    $('statDone').textContent   = historyDone;
+    $('statActive').textContent = active.length;
+  } else {
+    statsBar.style.display = 'none';
+    scopeSwitch.style.display = 'none';
+    tabsWrap.style.display = 'none';
+  }
+
+  const source = state.scope === 'history' ? history : active;
+  const currentConfig = tabConfig[state.scope];
+  const counts = {
+    all: source.length,
+    downloading: active.filter(d => ['downloading', 'finalizing'].includes(d.status)).length,
+    queued: active.filter(d => d.status === 'queued').length,
+    paused: active.filter(d => d.status === 'paused').length,
+    done: history.filter(d => d.status === 'done').length,
+    error: history.filter(d => d.status === 'error').length,
+    cancelled: history.filter(d => d.status === 'cancelled').length,
+  };
+
+  currentConfig.forEach(item => {
+    $(item.countId).textContent = counts[item.key] || 0;
+  });
+
+  const filtered = state.filter === 'all'
+    ? source
+    : source.filter(d => {
+        if (state.filter === 'downloading') return ['downloading', 'finalizing'].includes(d.status);
+        return d.status === state.filter;
+      });
+
+  if (!filtered.length) {
+    const hasAnyData = allCount > 0;
+    const emptyTitle = !hasAnyData
+      ? 'هیچ دانلودی نیست'
+      : state.scope === 'history'
+        ? 'تاریخچه‌ای پیدا نشد'
+        : 'دانلود فعالی پیدا نشد';
+    const emptyText = !hasAnyData
+      ? 'یک لینک ویدئو بالا وارد کن'
+      : state.scope === 'history'
+        ? 'با این فیلتر هنوز موردی در تاریخچه ثبت نشده'
+        : 'یا همه دانلودها تمام شده‌اند یا فیلتر دیگری انتخاب کن';
+    const emptyIcon = !hasAnyData ? 'fa-inbox' : state.scope === 'history' ? 'fa-folder-tree' : 'fa-bolt';
+
+    dlList.innerHTML = `
+      <div class="empty">
+        <span class="empty-icon"><i class="fa-solid ${emptyIcon}"></i></span>
+        <strong>${emptyTitle}</strong>
+        <p>${emptyText}</p>
+      </div>`;
+    return;
+  }
+
+  dlList.innerHTML = filtered.map(renderItem).join('');
+}
+
+const statusLabel = {
+  queued:      'در صف',
+  downloading: 'در حال دانلود',
+  finalizing:  'در حال نهایی‌سازی…',
+  paused:      'متوقف',
+  done:        'تموم شد',
+  error:       'خطا',
+  cancelled:   'لغو شد',
+};
+
+// ── Fragment builders (shared between full render and in-place patching) ──
+function metaHtml(dl) {
+  const sizeStr = dl.totalBytes ? formatBytes(dl.totalBytes) : '';
+  return `
+        <span class="dl-badge badge-${dl.status}">${statusLabel[dl.status] || dl.status}</span>
+        ${sizeStr  ? `<span class="dl-size">${sizeStr}</span>` : ''}
+        ${dl.format === 'audio' ? '<span class="dl-size"><i class="fa-solid fa-music"></i> MP3</span>' : ''}`;
+}
+
+function progStatsHtml(dl) {
+  return `
+      <span class="dl-pct">${dl.progress}%</span>
+      ${dl.speed ? `<span class="dl-speed"><i class="fa-solid fa-bolt"></i> ${dl.speed}</span>` : ''}
+      ${dl.eta   ? `<span class="dl-eta">ETA ${dl.eta}</span>` : ''}`;
+}
+
+function logEntryHtml(entry) {
+  return `<div class="dl-log-entry ${entry.type}"><span style="opacity:0.5">[${entry.time}]</span> ${esc(entry.msg)}</div>`;
+}
+
+function logsHtml(dl) {
+  const entries = (dl.logs || []).map(logEntryHtml).join('');
+  return entries || '<div class="dl-log-placeholder" style="opacity:0.3; text-align:center; padding-top:20px">در انتظار عملیات...</div>';
+}
+
+function renderItem(dl) {
+  const key = getDownloadKey(dl);
+  const isDone     = dl.status === 'done';
+  const isError    = dl.status === 'error';
+  const isActive   = ['downloading','finalizing'].includes(dl.status);
+  const fillClass  = `fill-${dl.status}`;
+  const thumb      = dl.thumb
+    ? `<img src="${dl.thumb}" alt="" onerror="this.style.display='none'">`
+    : '<i class="fa-solid fa-film"></i>';
+
+  return `
+<div class="dl-item ${isActive ? 'is-downloading' : ''}" data-id="${escAttr(key)}" data-status="${dl.status}" data-progress="${dl.progress}">
+  <div class="dl-header">
+    <div class="dl-thumb">${thumb}</div>
+    <div class="dl-body">
+      <div class="dl-title" title="${esc(dl.title)}">${esc(dl.title)}</div>
+      <div class="dl-meta">${metaHtml(dl)}</div>
+    </div>
+  </div>
+
+  <div class="dl-prog-row">
+    <div class="dl-track">
+      <div class="dl-fill ${fillClass}" style="width:${dl.progress}%"></div>
+    </div>
+    <div class="dl-prog-stats">${progStatsHtml(dl)}</div>
+  </div>
+
+  <div class="dl-log-container">${logsHtml(dl)}</div>
+
+  ${isError && dl.errorMsg ? `<div class="dl-error-msg"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(dl.errorMsg)}</div>` : ''}
+
+  <div class="dl-actions">
+    ${isDone ? `
+      <button class="dl-btn dl-btn-ok" onclick="saveFile(${jsArg(key)})" title="ذخیره"><i class="fa-solid fa-floppy-disk"></i><span>ذخیره</span></button>
+      <button class="dl-btn" onclick="openFolder(${jsArg(key)})" title="باز کردن پوشه"><i class="fa-solid fa-folder-open"></i></button>
+    ` : ''}
+    ${isError ? `<button class="dl-btn" onclick="retryDl(${jsArg(key)})" title="تلاش مجدد"><i class="fa-solid fa-rotate-right"></i><span>تلاش مجدد</span></button>` : ''}
+    ${isActive || dl.status === 'queued' || dl.status === 'paused' ? `<button class="dl-btn dl-btn-danger" onclick="cancelDl(${jsArg(key)})" title="لغو"><i class="fa-solid fa-xmark"></i><span>لغو</span></button>` : ''}
+    <button class="dl-btn dl-btn-danger" onclick="removeDl(${jsArg(key)})" title="حذف"><i class="fa-solid fa-trash"></i></button>
+  </div>
+</div>`;
+}
+
+/* ══ In-place patching (no full re-render during streaming) ══════════════════ */
+// Returns the live DOM node for a download, or null if it isn't currently shown.
+function findItemEl(key) {
+  return dlList.querySelector(`.dl-item[data-id="${CSS.escape(String(key))}"]`);
+}
+
+// Surgically update an already-rendered card. Used for progress ticks where the
+// status (and therefore the card's structure/buttons/filter bucket) is unchanged.
+// Returns false if the card isn't on screen, so the caller can decide what to do.
+function patchDownloadCard(dl) {
+  const el = findItemEl(getDownloadKey(dl));
+  if (!el) return false;
+
+  el.dataset.status   = dl.status;
+  el.dataset.progress = dl.progress;
+
+  const fill = el.querySelector('.dl-fill');
+  if (fill) fill.style.width = `${dl.progress}%`;
+
+  const stats = el.querySelector('.dl-prog-stats');
+  if (stats) stats.innerHTML = progStatsHtml(dl);
+
+  const meta = el.querySelector('.dl-meta');
+  if (meta) meta.innerHTML = metaHtml(dl);
+
+  return true;
+}
+
+// Append a single log line to a card without rebuilding it, preserving the
+// auto-scroll-to-bottom feel and the per-entry slide-in animation.
+function appendLogToCard(key, entry) {
+  const el = findItemEl(key);
+  if (!el) return;
+  const container = el.querySelector('.dl-log-container');
+  if (!container) return;
+
+  const placeholder = container.querySelector('.dl-log-placeholder');
+  if (placeholder) placeholder.remove();
+
+  const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 24;
+
+  container.insertAdjacentHTML('beforeend', logEntryHtml(entry));
+  while (container.children.length > 20) container.firstElementChild.remove();
+
+  if (atBottom) container.scrollTop = container.scrollHeight;
+}
+
+function esc(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(str) {
+  return esc(str).replace(/'/g, '&#39;');
+}
+// Safe single-quoted JS string literal for embedding inside a double-quoted HTML
+// attribute (e.g. onclick). Avoids the double-quote clash JSON.stringify causes.
+function jsArg(value) {
+  return `'${String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+}
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+  return (b/1073741824).toFixed(2) + ' GB';
+}
+
+/* ══ Download Actions ════════════════════════════════════════════════════════ */
+window.saveFile = async (key) => {
+  const dl = getDownloadByKey(key);
+  const btn = document.querySelector(`.dl-item[data-id="${CSS.escape(String(key))}"] .dl-btn-ok`);
+  const originalHtml = btn ? btn.innerHTML : '';
+  if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true; }
+  try {
+    const response = await fetch(`/api/download-file?id=${encodeURIComponent(dl?.id || '')}&sessionId=${encodeURIComponent(dl?.sessionId || key)}`);
+    if (!response.ok) throw new Error('دانلود فایل ناموفق بود');
+    const blob = await response.blob();
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob),
+      download: (dl?.title || 'video').replace(/[\\/:*?"<>|]/g, '_'),
+    });
+    document.body.appendChild(a);
+    a.click();
+    URL.revokeObjectURL(a.href);
+    a.remove();
+    toast('فایل ذخیره شد ✅');
+  } catch (e) { toast('خطا: ' + e.message); }
+  finally { if (btn) { btn.innerHTML = originalHtml; btn.disabled = false; } }
+};
+
+window.openFolder = key => {
+  const dl = getDownloadByKey(key);
+  return api('/api/open-folder', { id: dl?.id, sessionId: dl?.sessionId || key });
+};
+
+window.cancelDl = async key => {
+  const dl = getDownloadByKey(key);
+  await api('/api/cancel', { id: dl?.id, sessionId: dl?.sessionId || key });
+  toast('دانلود لغو شد');
+};
+
+window.removeDl = async key => {
+  const dl = getDownloadByKey(key);
+  await api('/api/remove', { id: dl?.id, sessionId: dl?.sessionId || key });
+  delete state.downloads[key];
+  delete state.history[key];
+  renderDownloads();
+};
+
+window.retryDl = async key => {
+  const dl = getDownloadByKey(key);
+  if (!dl) return;
+  try {
+    const res = await api('/api/retry', { id: dl.id, sessionId: dl.sessionId || key });
+    if (!res.ok) throw new Error(res.error || 'تلاش مجدد ناموفق بود');
+    // Resume in place: move the card from history → active and show it running
+    // immediately (the live SSE stream takes over from here).
+    delete state.history[key];
+    state.downloads[key] = { ...dl, status: 'downloading', speed: '', eta: '', errorMsg: '' };
+    applyScope('active');
+    toast('در حال ادامه و تعمیر دانلود... 🔄');
+  } catch (e) {
+    toast('خطا: ' + e.message);
+  }
+};
+
+/* ══ Header Buttons ══════════════════════════════════════════════════════════ */
+$('folderBtn').addEventListener('click', () => api('/api/open-folder', {}));
+$('settingsBtn').addEventListener('click', async () => {
+  const cfg = await api('/api/config');
+  $('cfgFolder').value = cfg.downloadFolder || '';
+  $('cfgProxy').value  = cfg.proxy          || '';
+  $('settingsOverlay').classList.add('show');
+});
+$('settingsClose').addEventListener('click', () => $('settingsOverlay').classList.remove('show'));
+$('settingsCancel').addEventListener('click', () => $('settingsOverlay').classList.remove('show'));
+$('settingsOverlay').addEventListener('click', e => { if (e.target === $('settingsOverlay')) $('settingsOverlay').classList.remove('show'); });
+
+$('settingsSave').addEventListener('click', async () => {
+  await api('/api/config', {
+    downloadFolder: $('cfgFolder').value.trim(),
+    proxy:          $('cfgProxy').value.trim(),
+  });
+  $('settingsOverlay').classList.remove('show');
+  toast('تنظیمات ذخیره شد ✅');
+});
+
+$('proxyTestBtn').addEventListener('click', async () => {
+  const proxy  = $('cfgProxy').value.trim();
+  const result = $('proxyTestResult');
+  result.className = 'proxy-result proxy-load';
+  result.textContent = '⏳ در حال تست…';
+  try {
+    const res = await api('/api/proxy-test', { proxy });
+    if (res.ok) {
+      result.className  = 'proxy-result proxy-ok';
+      result.textContent = `✅ متصل! IP: ${res.ip}`;
+    } else {
+      result.className  = 'proxy-result proxy-err';
+      result.textContent = '❌ ' + res.error;
+    }
+  } catch { result.className = 'proxy-result proxy-err'; result.textContent = '❌ خطای شبکه'; }
+});
+
+/* ══ Admin Panel ══════════════════════════════════════════════════════════════ */
+$('adminBtn').addEventListener('click', () => {
+  const pass = prompt('رمز عبور مدیریت:');
+  if (!pass) return;
+  state.adminPass = pass;
+  loadAdmin();
+});
+
+$('adminCloseBtn').addEventListener('click', () => {
+  $('adminPanel').classList.remove('show');
+  $('mainView').style.display = '';
+  state.isAdmin = false;
+});
+
+async function loadAdmin() {
+  try {
+    const res = await api('/api/admin/stats', undefined, { 'Authorization': state.adminPass });
+    if (!res.ok) throw new Error(res.error);
+    state.isAdmin = true;
+    $('mainView').style.display  = 'none';
+    $('adminPanel').classList.add('show');
+
+    const s = res.stats;
+    $('aStatTotal').textContent  = s.totalDownloads;
+    $('aStatData').textContent   = formatBytes(s.totalBytes);
+    $('aStatActive').textContent = s.activeCount;
+    $('aStatErrors').textContent = s.errors;
+    $('aStatUptime').textContent = s.uptime;
+
+    $('adminTbody').innerHTML = (s.queue || []).map(dl => `
+      <tr>
+        <td data-label="#" style="color:var(--text3)">${dl.id}</td>
+        <td data-label="عنوان" class="admin-cell-title" title="${esc(dl.title)}">${esc(dl.title)}</td>
+        <td data-label="پلتفرم">${platformIconHtml(dl.url)}</td>
+        <td data-label="فرمت"><span class="admin-chip">${dl.format === 'video' ? 'ویدئو' : 'صدا'}</span></td>
+        <td data-label="کیفیت">${dl.quality || '—'}</td>
+        <td data-label="وضعیت"><span class="dl-badge badge-${dl.status}">${statusLabel[dl.status] || dl.status}</span></td>
+        <td data-label="عمل">
+          ${['downloading','finalizing','queued'].includes(dl.status)
+            ? `<button class="btn btn-danger admin-cancel-btn" onclick="adminCancel(${dl.id})"><i class="fa-solid fa-xmark"></i> لغو</button>`
+            : '—'}
+        </td>
+      </tr>
+    `).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px">صف خالیه 🎉</td></tr>';
+  } catch (e) {
+    alert('دسترسی مدیریت ناموفق بود: ' + e.message);
+  }
+}
+
+window.adminCancel = async id => {
+  await api('/api/admin/cancel', { id }, { 'Authorization': state.adminPass });
+  await loadAdmin();
+};
+
+/* ══ Admin Update Logic ══════════════════════════════════════════════════════ */
+async function performYtdlpUpdate(master = false) {
+  const btn = master ? $('updateYtdlpMasterBtn') : $('updateYtdlpBtn');
+  const status = $('updateStatus');
+  const originalHtml = btn.innerHTML;
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>در حال آپدیت…</span>';
+  status.textContent = 'در حال دریافت نسخه جدید yt-dlp از گیت‌هاب…';
+  status.style.color = 'var(--accent)';
+
+  try {
+    const res = await api('/api/admin/update-ytdlp', { master }, { 'Authorization': state.adminPass });
+    if (!res.ok) throw new Error(res.error);
+    status.textContent = `✅ با موفقیت آپدیت شد! نسخه: ${res.version}`;
+    status.style.color = 'var(--success)';
+    toast('هسته با موفقیت به‌روزرسانی شد ✅');
+  } catch (e) {
+    status.textContent = `❌ خطا در آپدیت: ${e.message}`;
+    status.style.color = 'var(--error)';
+    toast('خطا در به‌روزرسانی هسته');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
+}
+
+$('updateYtdlpBtn').addEventListener('click', () => performYtdlpUpdate(false));
+$('updateYtdlpMasterBtn').addEventListener('click', () => performYtdlpUpdate(true));

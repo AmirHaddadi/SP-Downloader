@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>VDL — دانلودر ویدئو</title>
+<link rel="stylesheet" href="/fontawesome/css/all.min.css">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+
+<div class="app">
+  <!-- ═══ Header ══════════════════════════════════════════════════════════════ -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-mark">
+        <img src="Logo.png" alt="Logo">
+      </div>
+      <div>
+        <div class="logo-name">VDL</div>
+        <div class="logo-sub">Video Downloader Pro</div>
+      </div>
+    </div>
+    <div class="header-btns">
+      <button class="btn btn-ghost" id="adminBtn"><i class="fa-solid fa-user-shield"></i><span>مدیریت</span></button>
+      <button class="btn btn-ghost" id="folderBtn"><i class="fa-solid fa-folder-open"></i><span>پوشه</span></button>
+      <button class="btn btn-ghost" id="settingsBtn"><i class="fa-solid fa-gear"></i><span>تنظیمات</span></button>
+    </div>
+  </header>
+
+  <!-- ═══ Search Bar ═══════════════════════════════════════════════════════════ -->
+  <div class="search-area">
+    <div class="search-bar" id="searchBar">
+      <span class="platform-icon" id="platformIcon"><i class="fa-solid fa-link"></i></span>
+      <input class="url-input" id="urlInput" type="text" autocomplete="off" spellcheck="false"
+             placeholder="لینک ویدئو را وارد کنید و Enter بزنید…">
+      <button class="btn btn-primary" id="addBtn"><i class="fa-solid fa-plus"></i><span>افزودن</span></button>
+    </div>
+    <div class="search-hint" id="searchHint"></div>
+  </div>
+
+  <!-- ═══ Preview Grid (up to 5 parallel cards) ════════════════════════════════ -->
+  <div class="preview-grid" id="previewGrid"></div>
+
+  <!-- ═══ Stats + Tabs + List ════════════════════════════════════════════════ -->
+  <div id="mainView">
+    <div class="stats-bar" id="statsBar" style="display:none">
+      <span><i class="fa-solid fa-cloud-arrow-down"></i> <strong id="statCount">0</strong> دانلود</span>
+      <span class="stats-dot"></span>
+      <span><i class="fa-solid fa-circle-check"></i> <strong id="statDone">0</strong> تموم شده</span>
+      <span class="stats-dot"></span>
+      <span><i class="fa-solid fa-bolt"></i> <strong id="statActive">0</strong> فعال</span>
+    </div>
+
+    <div class="scope-switch" id="scopeSwitch" style="display:none">
+      <button class="scope-btn active" id="scopeActive" data-scope="active">
+        <span>در حال اجرا</span>
+        <span class="scope-badge" id="scopeCountActive">0</span>
+      </button>
+      <button class="scope-btn" id="scopeHistory" data-scope="history">
+        <span>تاریخچه</span>
+        <span class="scope-badge" id="scopeCountHistory">0</span>
+      </button>
+    </div>
+
+    <div class="tabs" id="tabs" style="display:none">
+      <button class="tab active" data-filter="all"><span id="tabLabelAll">همه</span><span class="tab-badge" id="countAll">0</span></button>
+      <button class="tab" data-filter="downloading"><span id="tabLabelTwo">در حال دانلود</span><span class="tab-badge" id="countDl">0</span></button>
+      <button class="tab" data-filter="done"><span id="tabLabelThree">تموم شده</span><span class="tab-badge" id="countDone">0</span></button>
+      <button class="tab" data-filter="error"><span id="tabLabelFour">خطا</span><span class="tab-badge" id="countErr">0</span></button>
+    </div>
+
+    <div class="dl-list" id="dlList">
+      <div class="empty">
+        <span class="empty-icon"><i class="fa-solid fa-inbox"></i></span>
+        <strong>هیچ دانلودی نیست</strong>
+        <p>یک لینک ویدئو بالا وارد کن</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Admin Panel ══════════════════════════════════════════════════════════ -->
+  <div class="admin-panel" id="adminPanel">
+    <div style="margin-bottom:24px">
+      <div class="admin-head">
+        <h2 class="admin-head-title"><i class="fa-solid fa-chart-line"></i> داشبورد مدیریت</h2>
+        <button class="btn btn-ghost" id="adminCloseBtn"><i class="fa-solid fa-arrow-right"></i><span>بازگشت</span></button>
+      </div>
+      <div class="admin-grid">
+        <div class="admin-stat">
+          <div class="admin-stat-label">کل دانلودها</div>
+          <div class="admin-stat-value accent" id="aStatTotal">—</div>
+        </div>
+        <div class="admin-stat">
+          <div class="admin-stat-label">داده مصرفی</div>
+          <div class="admin-stat-value" id="aStatData">—</div>
+        </div>
+        <div class="admin-stat">
+          <div class="admin-stat-label">در حال اجرا</div>
+          <div class="admin-stat-value success" id="aStatActive">—</div>
+        </div>
+        <div class="admin-stat">
+          <div class="admin-stat-label">خطاها</div>
+          <div class="admin-stat-value error" id="aStatErrors">—</div>
+        </div>
+        <div class="admin-stat">
+          <div class="admin-stat-label">زمان فعالیت</div>
+          <div class="admin-stat-value" id="aStatUptime">—</div>
+        </div>
+      </div>
+
+      <!-- Core Update Section -->
+      <div class="admin-update">
+        <div class="admin-update-info">
+          <h3><i class="fa-solid fa-screwdriver-wrench"></i> به‌روزرسانی هسته (yt-dlp)</h3>
+          <p>اگر دانلودی با خطا مواجه شد (مثل No video formats found)، هسته را آپدیت کنید.</p>
+        </div>
+        <div class="admin-update-actions">
+          <button class="btn btn-ghost" id="updateYtdlpBtn"><i class="fa-solid fa-rotate"></i><span>نسخه پایدار</span></button>
+          <button class="btn btn-primary" id="updateYtdlpMasterBtn"><i class="fa-solid fa-rocket"></i><span>نسخه Master (رفع خطا)</span></button>
+        </div>
+      </div>
+      <div id="updateStatus" class="admin-update-status"></div>
+
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>#</th><th>عنوان</th><th>پلتفرم</th><th>فرمت</th><th>کیفیت</th><th>وضعیت</th><th>عمل</th>
+            </tr>
+          </thead>
+          <tbody id="adminTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Settings Modal ════════════════════════════════════════════════════════ -->
+<div class="overlay" id="settingsOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fa-solid fa-gear"></i> تنظیمات</span>
+      <button class="btn btn-ghost modal-close" id="settingsClose"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <div class="field-group">
+        <div class="field-label"><i class="fa-solid fa-folder"></i> پوشه ذخیره‌سازی</div>
+        <input class="field-input" id="cfgFolder" type="text" placeholder="C:\Users\...\Downloads\VDL" dir="ltr">
+        <div class="field-hint">مسیر کامل پوشه برای ذخیره فایل‌های دانلود شده</div>
+      </div>
+      <div class="field-group">
+        <div class="field-label"><i class="fa-solid fa-globe"></i> پروکسی <span class="field-label-opt">(اختیاری)</span></div>
+        <div class="field-row">
+          <input class="field-input" id="cfgProxy" type="text" placeholder="http://127.0.0.1:10809" dir="ltr" style="flex:1">
+          <button class="btn btn-ghost" id="proxyTestBtn"><i class="fa-solid fa-plug"></i><span>تست</span></button>
+        </div>
+        <div class="proxy-result" id="proxyTestResult"></div>
+        <div class="field-hint">فرمت: http://user:pass@host:port یا socks5://host:port</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="settingsCancel">انصراف</button>
+      <button class="btn btn-primary" id="settingsSave"><i class="fa-solid fa-floppy-disk"></i><span>ذخیره</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-wrap" id="toastWrap"></div>
+
+</body>
+</html>
