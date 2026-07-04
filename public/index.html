@@ -10,9 +10,9 @@
 <link rel="icon" href="/favicon/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
 <link rel="manifest" href="/favicon/site.webmanifest">
-<link rel="stylesheet" href="/fontawesome/css/all.min.css">
-<link rel="stylesheet" href="style.css">
-<script src="app.js" defer></script>
+<link rel="stylesheet" href="./fontawesome/css/all.min.css">
+<link rel="stylesheet" href="./style.css">
+<script src="./app.js" defer></script>
 </head>
 <body>
 
@@ -70,11 +70,34 @@
       </button>
     </div>
 
-    <div class="tabs" id="tabs" style="display:none">
-      <button class="tab active" data-filter="all"><span id="tabLabelAll">همه</span><span class="tab-badge" id="countAll">0</span></button>
-      <button class="tab" data-filter="downloading"><span id="tabLabelTwo">در حال دانلود</span><span class="tab-badge" id="countDl">0</span></button>
-      <button class="tab" data-filter="done"><span id="tabLabelThree">تموم شده</span><span class="tab-badge" id="countDone">0</span></button>
-      <button class="tab" data-filter="error"><span id="tabLabelFour">خطا</span><span class="tab-badge" id="countErr">0</span></button>
+    <div class="filter-navbar" id="filterNavbar" style="display:none">
+      <div class="filter-group" id="statusFilters">
+        <button class="filter-nav-item active" data-filter="all" data-type="status"><i class="fa-solid fa-list"></i><span>همه</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="downloading" data-type="status"><i class="fa-solid fa-bolt"></i><span>دانلود</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="queued" data-type="status"><i class="fa-solid fa-hourglass-half"></i><span>صف</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="paused" data-type="status"><i class="fa-solid fa-pause"></i><span>متوقف</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="finalizing" data-type="status"><i class="fa-solid fa-spinner"></i><span>نهایی‌سازی</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="done" data-type="status"><i class="fa-solid fa-check"></i><span>تکمیل</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="error" data-type="status"><i class="fa-solid fa-circle-exclamation"></i><span>خطا</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="cancelled" data-type="status"><i class="fa-solid fa-xmark"></i><span>لغو</span><span class="filter-badge">0</span></button>
+      </div>
+      <div class="filter-group" id="formatFilters">
+        <button class="filter-nav-item active" data-filter="all" data-type="format"><i class="fa-solid fa-file"></i><span>همه</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="video" data-type="format"><i class="fa-solid fa-film"></i><span>ویدئو</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="audio" data-type="format"><i class="fa-solid fa-music"></i><span>صوت</span><span class="filter-badge">0</span></button>
+      </div>
+      <div class="filter-group" id="platformFilters">
+        <button class="filter-nav-item active" data-filter="all" data-type="platform"><i class="fa-solid fa-film"></i><span>همه</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="youtube" data-type="platform"><i class="fa-solid fa-film"></i><span>YouTube</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="tiktok" data-type="platform"><i class="fa-solid fa-film"></i><span>TikTok</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="instagram" data-type="platform"><i class="fa-solid fa-film"></i><span>Instagram</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="twitter" data-type="platform"><i class="fa-solid fa-x-film"></i><span>Twitter</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="vimeo" data-type="platform"><i class="fa-solid fa-film"></i><span>Vimeo</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="twitch" data-type="platform"><i class="fa-solid fa-film"></i><span>Twitch</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="dailymotion" data-type="platform"><i class="fa-solid fa-film"></i><span>Dailymotion</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="pornhub" data-type="platform"><i class="fa-solid fa-film"></i><span>PornHub</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="xhamster" data-type="platform"><i class="fa-solid fa-film"></i><span>XHamster</span><span class="filter-badge">0</span></button>
+      </div>
     </div>
 
     <div class="dl-list" id="dlList">

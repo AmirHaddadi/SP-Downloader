@@ -192,6 +192,10 @@ function startDownload(id) {
     '-o', path.join(folder, '%(title).100s.%(ext)s'),
   ];
 
+  if (dl.status === 'paused' && dl.filePath && fs.existsSync(dl.filePath + '.part')) {
+    args.push('--continue', '--download-archive', path.join(folder, '.yt-dlp-archive'));
+  }
+
   if (dl.format === 'audio') {
     const abr = dl.quality ? dl.quality.replace('kbps', '') : '128';
     args.push('-f', 'bestaudio/best', '-x', '--audio-format', 'mp3', '--audio-quality', abr, '--no-keep-video');
@@ -204,7 +208,7 @@ function startDownload(id) {
   }
   args.push(dl.url);
 
-  Object.assign(dl, { status: 'downloading', progress: 0, speed: '', eta: '', errorMsg: '', startTime: Date.now() });
+  Object.assign(dl, { status: 'downloading', progress: dl.progress || 0, speed: '', eta: '', errorMsg: '', startTime: Date.now() });
   broadcast({ type: 'update', download: sanitize(dl) });
 
   const proc = spawn(getYtdlpPath(), args, { windowsHide: true });
@@ -327,7 +331,7 @@ const server = http.createServer(async (req, res) => {
       const { url, title, thumb, format, quality } = JSON.parse(await readBody(req));
       if (!url?.match(/^https?:\/\//i)) return json(res, 400, { ok: false, error: 'URL نامعتبر' });
       const id = store.nextId++;
-      const dl = { id, url, title: title || 'Unknown', thumb: thumb || '', format: format || 'video', quality: quality || '', status: 'queued', progress: 0, speed: '', eta: '', filePath: '', errorMsg: '', totalBytes: 0, timestamp: Date.now() };
+      const dl = { id, url, title: title || 'Unknown', thumb: thumb || '', format: format || 'video', quality: quality || '', platform: hostnameOf(url), status: 'queued', progress: 0, speed: '', eta: '', filePath: '', errorMsg: '', totalBytes: 0, timestamp: Date.now() };
       store.downloads.set(id, dl);
       broadcast({ type: 'update', download: sanitize(dl) });
       startDownload(id);
@@ -376,26 +380,50 @@ const server = http.createServer(async (req, res) => {
     const dl = store.downloads.get(id);
     if (dl?.proc) {
       dl.status = 'paused';
-      process.platform === 'win32'
-        ? spawn('taskkill', ['/F', '/T', '/PID', dl.proc.pid], { windowsHide: true })
-        : dl.proc.kill('SIGSTOP');
-      if (process.platform === 'win32') dl.proc = null;
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/F', '/T', '/PID', dl.proc.pid], { windowsHide: true });
+        dl.proc = null;
+      } else {
+        dl.proc.kill('SIGSTOP');
+      }
       broadcast({ type: 'update', download: sanitize(dl) });
     }
-    json(res, 200, { ok: true });
+    json(res, 200, { ok: true, status: dl?.status || 'not_found' });
     return;
   }
 
   // ── /api/resume ───────────────────────────────────────────────────────────
   if (pathname === '/api/resume' && req.method === 'POST') {
-    const { id } = JSON.parse(await readBody(req));
+    const { id, restart } = JSON.parse(await readBody(req));
     const dl = store.downloads.get(id);
+    if (!dl) {
+      json(res, 400, { ok: false, error: 'دانلود یافت نشد' });
+      return;
+    }
     if (dl?.proc && process.platform !== 'win32') {
       dl.status = 'downloading';
       dl.proc.kill('SIGCONT');
       broadcast({ type: 'update', download: sanitize(dl) });
-    } else if (dl?.status === 'paused') startDownload(id);
-    json(res, 200, { ok: true });
+      json(res, 200, { ok: true, status: 'resumed' });
+    } else if (dl?.status === 'paused') {
+      const cfg = loadConfig();
+      const folder = cfg.downloadFolder;
+      const partFile = dl.filePath ? dl.filePath + '.part' : null;
+      const hasPartFile = partFile && fs.existsSync(partFile);
+      if (restart || !hasPartFile) {
+        dl.status = 'queued';
+        dl.progress = 0;
+        dl.speed = '';
+        dl.eta = '';
+        startDownload(id);
+        json(res, 200, { ok: true, status: 'restarted' });
+      } else {
+        startDownload(id);
+        json(res, 200, { ok: true, status: 'resumed' });
+      }
+    } else {
+      json(res, 400, { ok: false, error: 'دانلود برای ادامه یافت نشد یا وضعیت نامناسبی دارد' });
+    }
     return;
   }
 

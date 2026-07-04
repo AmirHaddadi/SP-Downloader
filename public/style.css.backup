@@ -297,41 +297,62 @@ input,select{font-family:inherit;outline:none}
   position:relative;z-index:2;
   border-radius:16px;
 }
-.url-input::placeholder{color:var(--text3)}
+.url-input::placeholder{color:transparent}
 .url-input:disabled{cursor:not-allowed}
 
-/* Custom animated border for url-input */
-.url-input::after {
+/* Animated thin rotating border for search bar */
+.search-bar::before {
   content: '';
   position: absolute;
   inset: -2px;
-  border-radius: 16px;
-  border: 2px solid transparent;
-  border-image: conic-gradient(
-    from 0deg at 0% 0%,
-    rgba(59, 130, 246, 0.6) 0deg,
-    rgba(16, 185, 129, 0.6) 120deg,
-    rgba(139, 92, 246, 0.6) 240deg,
-    rgba(59, 130, 246, 0.6) 360deg
-  ) 1;
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
+  border-radius: 20px;
+  background: conic-gradient(
+    from 0deg at 50% 50%,
+    rgb(59, 130, 246),
+    rgb(16, 185, 129),
+    rgb(139, 92, 246),
+    rgb(59, 130, 246)
+  );
+  z-index: 0;
+  animation: borderRotate 4s linear infinite;
+  opacity: 0.8;
   pointer-events: none;
-  animation: borderSpin 2s linear infinite;
-  z-index: 1;
 }
 
-@keyframes borderSpin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+@keyframes borderRotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
-/* Streaming placeholder text animation */
-.url-input::before {
+/* Streaming placeholder text animation - inner overlay */
+.search-bar::after {
   content: '';
+  position: absolute;
+  left: 6px;
+  right: 50px;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.search-bar::after::before {
+  content: 'لینک ویدئو وارد کنید • دانلود از YouTube • TikTok Video • Instagram Reel • Enter URL • ';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%) translateX(100%);
+  white-space: nowrap;
+  color: var(--text3);
+  font-size: 0.95rem;
+  direction: ltr;
+  animation: textStream 18s linear infinite;
+}
+
+@keyframes textStream {
+  { transform: translateY(-50%) translateX(100%); }
+  { transform: translateY(-50%) translateX(-100%); }
   position: absolute;
   left: 12px;
   right: 12px;

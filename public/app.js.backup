@@ -22,62 +22,6 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
   if (!localStorage.getItem(THEME_KEY) || localStorage.getItem(THEME_KEY) === 'auto') wiggleTheme();
 });
 
-/* ══ Streaming Placeholder Animation ══*/
-function initStreamingPlaceholder() {
-  const searchBar = document.querySelector('.search-bar');
-  const urlInput = document.getElementById('urlInput');
-  
-  if (!searchBar || !urlInput) return;
-  
-  // Create streaming text overlay
-  const streamOverlay = document.createElement('div');
-  streamOverlay.className = 'search-stream-overlay';
-  streamOverlay.style.cssText = `
-    position: absolute;
-    left: 6px;
-    right: 50px;
-    top: 0;
-    bottom: 0;
-    overflow: hidden;
-    pointer-events: none;
-    z-index: 2;
-    direction: ltr;
-  `;
-  
-  const streamText = document.createElement('div');
-  streamText.style.cssText = `
-    position: absolute;
-    top: 50%;
-    left: 0;
-    transform: translateY(-50%) translateX(100%);
-    white-space: nowrap;
-    color: var(--text3);
-    font-size: 0.95rem;
-    animation: textStream 18s linear infinite;
-    will-change: transform;
-  `;
-  
-  // Hide streaming text when input is focused
-  urlInput.addEventListener('focus', () => {
-    streamOverlay.style.display = 'none';
-  });
-  
-  urlInput.addEventListener('blur', () => {
-    if (!urlInput.value.trim()) {
-      streamOverlay.style.display = 'block';
-    }
-  });
-  
-  // Hide if user starts typing
-  urlInput.addEventListener('input', () => {
-    if (urlInput.value.trim()) {
-      streamOverlay.style.display = 'none';
-    } else {
-      streamOverlay.style.display = 'block';
-    }
-  });
-}
-
 /* ══ State ════════════════════════════════════════════════════════════════════ */
 const MAX_PREVIEWS = 5;
 
@@ -188,14 +132,6 @@ function detectPlatform(url) {
 }
 function platformIconHtml(url) {
   return `<i class="${detectPlatform(url)}"></i>`;
-}
-
-function hostnameOf(url) {
-  try {
-    return new URL(url).hostname.toLowerCase();
-  } catch {
-    return '';
-  }
 }
 
 /* ══ Search Bar ══════════════════════════════════════════════════════════════ */
@@ -522,78 +458,59 @@ function connectSSE() {
 }
 connectSSE();
 
-/* ══ Filter Logic ══════════════════════════════════════════════════════════════════ */
-function getPlatformKey(url) {
-  if (!url) return 'other';
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    if (host.includes('youtube.com') || host.includes('youtu.be')) return 'youtube';
-    if (host.includes('tiktok.com')) return 'tiktok';
-    if (host.includes('instagram.com')) return 'instagram';
-    if (host.includes('twitter.com') || host.includes('x.com')) return 'twitter';
-    if (host.includes('vimeo.com')) return 'vimeo';
-    if (host.includes('twitch.tv')) return 'twitch';
-    if (host.includes('dailymotion.com')) return 'dailymotion';
-    if (host.includes('pornhub.com')) return 'pornhub';
-    if (host.includes('xhamster.com')) return 'xhamster';
-    return 'other';
-  } catch { return 'other'; }
-}
-function updateFilterBadges() {
-  const active = Object.values(state.downloads).sort(sortByNewest);
-  const history = Object.values(state.history).sort(sortByNewest);
-  const source = state.scope === 'history' ? history : active;
-  ['all','downloading','queued','paused','finalizing','done','error','cancelled'].forEach(s=>{
-    const btn=document.querySelector(`.filter-nav-item[data-filter="${s}"][data-type="status"]`);
-    if(btn){const c=source.filter(d=>s==='all'||d.status===s).length;btn.querySelector('.filter-badge').textContent=c;}
-  });
-  ['all','video','audio'].forEach(f=>{
-    const btn=document.querySelector(`.filter-nav-item[data-filter="${f}"][data-type="format"]`);
-    if(btn){const c=source.filter(d=>f==='all'||d.format===f).length;btn.querySelector('.filter-badge').textContent=c;}
-  });
-  ['all','youtube','tiktok','instagram','twitter','vimeo','twitch','dailymotion','pornhub','xhamster'].forEach(p=>{
-    const btn=document.querySelector(`.filter-nav-item[data-filter="${p}"][data-type="platform"]`);
-    if(btn){const c=source.filter(d=>p==='all'||getPlatformKey(d.url||'')===p).length;btn.querySelector('.filter-badge').textContent=c;}
-  });
-}
-function applyFilters() {
-  const active = Object.values(state.downloads).sort(sortByNewest);
-  const history = Object.values(state.history).sort(sortByNewest);
-  const source = state.scope === 'history' ? history : active;
-  return source.filter(dl => {
-    const statusMatch = state.filters.status === 'all' || dl.status === state.filters.status;
-    const formatMatch = state.filters.format === 'all' || dl.format === state.filters.format;
-    const platformMatch = state.filters.platform === 'all' || getPlatformKey(dl.url || '') === state.filters.platform;
-    return statusMatch && formatMatch && platformMatch;
-  });
-}
-/* ══ Filter Event Handlers ═════════════════════════════════════════════════ */
+/* ══ Tabs ════════════════════════════════════════════════════════════════════ */
+const tabConfig = {
+  active: [
+    { key: 'all', label: 'همه', countId: 'countAll' },
+    { key: 'downloading', label: 'در حال اجرا', countId: 'countDl' },
+    { key: 'queued', label: 'در صف', countId: 'countDone' },
+    { key: 'paused', label: 'متوقف', countId: 'countErr' },
+  ],
+  history: [
+    { key: 'all', label: 'همه', countId: 'countAll' },
+    { key: 'done', label: 'موفق', countId: 'countDl' },
+    { key: 'error', label: 'خطا', countId: 'countDone' },
+    { key: 'cancelled', label: 'لغو شده', countId: 'countErr' },
+  ],
+};
+
+const tabLabelIds = ['tabLabelAll', 'tabLabelTwo', 'tabLabelThree', 'tabLabelFour'];
+const tabs = Array.from(document.querySelectorAll('.tab'));
+
 function applyScope(scope) {
   state.scope = scope;
+
+  const config = tabConfig[scope];
+  tabs.forEach((tab, index) => {
+    tab.dataset.filter = config[index].key;
+    $(tabLabelIds[index]).textContent = config[index].label;
+  });
+
+  if (!config.some(item => item.key === state.filter)) {
+    state.filter = 'all';
+  }
+
+  tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.filter === state.filter));
   document.querySelectorAll('.scope-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.scope === scope);
   });
-  state.filters = { status: 'all', format: 'all', platform: 'all' };
-  document.querySelectorAll('.filter-nav-item').forEach(btn => {
-    btn.classList.remove('active');
-    if (btn.dataset.filter === 'all') btn.classList.add('active');
-  });
+
   renderDownloads();
 }
-function applyFilter(filterValue, filterType) {
-  state.filters[filterType] = filterValue;
-  document.querySelectorAll(`.filter-nav-item[data-type="${filterType}"]`).forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.filter === filterValue);
-  });
-  renderDownloads();
-}
+
 document.querySelectorAll('.scope-btn').forEach(btn => {
   btn.addEventListener('click', () => applyScope(btn.dataset.scope));
 });
-document.querySelectorAll('.filter-nav-item').forEach(btn => {
-  btn.addEventListener('click', () => applyFilter(btn.dataset.filter, btn.dataset.type));
+
+tabs.forEach(t => {
+  t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    state.filter = t.dataset.filter;
+    renderDownloads();
+  });
 });
-initStreamingPlaceholder();
+
 applyScope('active');
 loadDownloads();
 
@@ -605,6 +522,7 @@ function renderDownloads() {
   const historyDone = history.filter(d => d.status === 'done').length;
 
   const statsBar = $('statsBar');
+  const tabsWrap = $('tabs');
 
   $('scopeCountActive').textContent = active.length;
   $('scopeCountHistory').textContent = history.length;
@@ -692,7 +610,7 @@ function renderItem(dl) {
   const key = getDownloadKey(dl);
   const isDone     = dl.status === 'done';
   const isError    = dl.status === 'error';
-  const isActive   = ['downloading','finalizing','paused'].includes(dl.status);
+  const isActive   = ['downloading','finalizing'].includes(dl.status);
   const fillClass  = `fill-${dl.status}`;
   const thumb      = dl.thumb
     ? `<img src="${dl.thumb}" alt="" onerror="this.style.display='none'">`
@@ -725,8 +643,6 @@ function renderItem(dl) {
       <button class="dl-btn" onclick="openFolder(${jsArg(key)})" title="باز کردن پوشه"><i class="fa-solid fa-folder-open"></i></button>
     ` : ''}
     ${isError ? `<button class="dl-btn" onclick="retryDl(${jsArg(key)})" title="تلاش مجدد"><i class="fa-solid fa-rotate-right"></i><span>تلاش مجدد</span></button>` : ''}
-    ${dl.status === 'paused' ? `<button class="dl-btn dl-btn-primary" onclick="resumeDl(${jsArg(key)})" title="ادامه"><i class="fa-solid fa-play"></i><span>ادامه</span></button>` : ''}
-    ${isActive ? `<button class="dl-btn" onclick="pauseDl(${jsArg(key)})" title="متوقف"><i class="fa-solid fa-pause"></i></button>` : ''}
     ${isActive || dl.status === 'queued' || dl.status === 'paused' ? `<button class="dl-btn dl-btn-danger" onclick="cancelDl(${jsArg(key)})" title="لغو"><i class="fa-solid fa-xmark"></i><span>لغو</span></button>` : ''}
     <button class="dl-btn dl-btn-danger" onclick="removeDl(${jsArg(key)})" title="حذف"><i class="fa-solid fa-trash"></i></button>
   </div>
@@ -824,38 +740,6 @@ window.saveFile = async (key) => {
 window.openFolder = key => {
   const dl = getDownloadByKey(key);
   return api('/api/open-folder', { id: dl?.id, sessionId: dl?.sessionId || key });
-};
-
-window.pauseDl = async key => {
-  const dl = getDownloadByKey(key);
-  await api('/api/pause', { id: dl?.id, sessionId: dl?.sessionId || key });
-  toast('<i class="fa-solid fa-pause"></i> دانلود متوقف شد');
-};
-
-window.resumeDl = async key => {
-  const dl = getDownloadByKey(key);
-  const btn = document.querySelector(`.dl-item[data-id="${CSS.escape(String(key))}"] .dl-btn-primary`);
-  const originalHtml = btn ? btn.innerHTML : '';
-  if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>در حال ادامه...</span>'; btn.disabled = true; }
-  try {
-    const res = await api('/api/resume', { id: dl?.id, sessionId: dl?.sessionId || key });
-    if (!res.ok) {
-      toast(`<i class="fa-solid fa-circle-exclamation"></i> ${res.error || 'خطا در ادامه دانلود'}`);
-      if (res.error?.includes('فایل') || res.error?.includes('پیدا نشد') || res.status === 'restarted') {
-        const shouldRestart = confirm('فایل ناقص یافت نشد. آیا می‌خواهید از صفر شروع کنید؟');
-        if (shouldRestart) {
-          await api('/api/resume', { id: dl?.id, sessionId: dl?.sessionId || key, restart: true });
-          toast('<i class="fa-solid fa-rotate-right"></i> دانلود از صفر شروع شد');
-        }
-      }
-    } else {
-      toast(res.status === 'restarted' ? '<i class="fa-solid fa-rotate-right"></i> دانلود از صفر شروع شد' : '<i class="fa-solid fa-play"></i> دانلود ادامه یافت');
-    }
-  } catch (e) {
-    toast(`<i class="fa-solid fa-circle-exclamation"></i> خطا: ${escHtml(e.message)}`);
-  } finally {
-    if (btn) { btn.innerHTML = originalHtml; btn.disabled = false; }
-  }
 };
 
 window.cancelDl = async key => {
