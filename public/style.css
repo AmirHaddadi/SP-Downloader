@@ -584,8 +584,7 @@ input,select{font-family:inherit;outline:none}
   padding:1px 6px;font-size:0.65rem;color:var(--text3);
   min-width:18px;text-align:center;
 }
-.filter-nav-item.active .filter-badge{color:#000000;opacity:0.9}
-[data-theme="dark"] .filter-nav-item.active .filter-badge{color:#fff;opacity:0.9}
+.filter-nav-item.active .filter-badge{color:var(--accent);opacity:0.9}
 @media (max-width: 768px) {
   .filter-group:not(:last-child)::after { display: none; }
   .filter-navbar { gap: 12px; }
