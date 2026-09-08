@@ -100,21 +100,25 @@ html[data-theme="light"] {
   --shadow-lg:    0 12px 48px rgba(0,0,0,0.1);
 }
 
-/* ══ iOS Theme Switch Animation ═════════════════════════════════════════════ */
+/* ══ Theme Switch Animation ══════════════════════════════════════════════════
+   A soft, non-jarring cross-fade. No scale/rotate "wiggle" — that felt jumpy.
+   When the browser supports View Transitions we get a smooth cross-fade of
+   the whole page; everywhere else we fall back to the plain color transition
+   already declared on body/*. ═══════════════════════════════════════════════ */
 body {
-  transition: background-color 0.6s var(--ease), color 0.6s var(--ease);
+  transition: background-color 0.5s var(--ease), color 0.5s var(--ease);
 }
 
-.theme-wiggle {
-  animation: themePop 0.65s var(--ease-spring);
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.45s;
+  animation-timing-function: var(--ease);
 }
+::view-transition-old(root) { animation-name: themeFadeOut; }
+::view-transition-new(root) { animation-name: themeFadeIn; }
 
-@keyframes themePop {
-  0%   { transform: scale(1); }
-  30%  { transform: scale(0.98) rotate(-0.5deg); }
-  60%  { transform: scale(1.02) rotate(0.5deg); }
-  100% { transform: scale(1) rotate(0); }
-}
+@keyframes themeFadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes themeFadeIn  { from { opacity: 0; } to { opacity: 1; } }
 
 *,*::before,*::after{
   box-sizing:border-box;
@@ -146,7 +150,13 @@ input,select{font-family:inherit;outline:none}
 }
 
 /* ══ Layout ══════════════════════════════════════════════════════════════════ */
-.app{max-width:980px;margin:0 auto;padding:40px 20px 80px}
+.app{
+  max-width:980px;margin:0 auto;
+  padding-top:40px;padding-bottom:80px;
+  /* physical (not logical) sides — env() insets are physical regardless of RTL */
+  padding-left:max(20px,env(safe-area-inset-left));
+  padding-right:max(20px,env(safe-area-inset-right));
+}
 
 /* ══ Header ══════════════════════════════════════════════════════════════════ */
 .header{
@@ -586,8 +596,20 @@ input,select{font-family:inherit;outline:none}
 }
 .filter-nav-item.active .filter-badge{color:var(--accent);opacity:0.9}
 @media (max-width: 768px) {
+  /* Chip rows scroll horizontally instead of wrapping into a tall stack —
+     three filter groups × up to 9 chips each would otherwise push the
+     download list far down the screen on a phone. */
+  .filter-navbar { flex-direction: column; align-items: stretch; gap: 10px; }
+  .filter-group {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .filter-group::-webkit-scrollbar { display: none; }
+  .filter-nav-item { flex-shrink: 0; }
   .filter-group:not(:last-child)::after { display: none; }
-  .filter-navbar { gap: 12px; }
 }
 
 /* ══ Downloads List ══════════════════════════════════════════════════════════ */
@@ -840,21 +862,6 @@ select.field-input{cursor:pointer}
 .admin-update-actions .btn{font-size:0.75rem;height:38px}
 .admin-update-status{font-size:0.75rem;margin:-10px 0 20px;padding:0 10px;color:var(--accent);min-height:18px}
 
-.admin-table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
-.admin-table{width:100%;border-collapse:collapse;font-size:0.80rem}
-.admin-table th{
-  padding:10px 12px;text-align:right;
-  border-bottom:1px solid var(--border);
-  color:var(--text3);font-weight:600;
-  font-size:0.70rem;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;
-}
-.admin-table td{padding:10px 12px;border-bottom:1px solid var(--border);color:var(--text2);vertical-align:middle}
-.admin-table tr:last-child td{border-bottom:none}
-.admin-table tr:hover td{background:rgba(255,255,255,0.02)}
-.admin-cell-title{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.admin-chip{font-size:0.7rem;background:var(--bg-elevated);padding:2px 7px;border-radius:20px}
-.admin-cancel-btn{padding:4px 10px;font-size:0.72rem}
-
 /* ══ Footer ══════════════════════════════════════════════════════════════════ */
 .app-footer{
   text-align:center;
@@ -881,7 +888,7 @@ select.field-input{cursor:pointer}
 
 /* ══ Toast ═══════════════════════════════════════════════════════════════════ */
 .toast-wrap{
-  position:fixed;bottom:24px;left:24px;
+  position:fixed;bottom:max(24px,calc(24px + env(safe-area-inset-bottom)));left:max(24px,env(safe-area-inset-left));
   z-index:500;display:flex;flex-direction:column;gap:8px;
   pointer-events:none;max-width:360px;
 }
@@ -915,20 +922,19 @@ select.field-input{cursor:pointer}
 
 /* Small tablet / phone landscape */
 @media (max-width:767px){
-  .app{padding:32px 16px 64px}
+  .app{padding-top:32px;padding-bottom:64px;padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
   .logo-mark{width:64px;height:64px}
   .logo-name{font-size:1.5rem}
   /* Single-column preview grid below this width so no card is ever clipped */
   .preview-grid{grid-template-columns:1fr}
   .dl-list{grid-template-columns:1fr}
-  /* Admin table → horizontally scrollable already; keep readable */
   .admin-update{flex-direction:column;align-items:stretch}
   .admin-update-actions .btn{flex:1}
 }
 
 /* Large phone / phablet */
 @media (max-width:599px){
-  .app{padding:24px 12px 56px}
+  .app{padding-top:24px;padding-bottom:56px;padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
   .header{margin-bottom:28px;gap:10px}
   .header-btns .btn span{display:none}
   .header-btns .btn{padding:10px 12px}
@@ -953,27 +959,15 @@ select.field-input{cursor:pointer}
   .quality-sel{padding:10px 12px;flex:1}
   .pv-controls{gap:10px}
 
-  /* Admin table → stacked label/value cards (7 cols won't fit a phone) */
-  .admin-table-wrap{border:none;overflow:visible}
-  .admin-table thead{display:none}
-  .admin-table,.admin-table tbody,.admin-table tr,.admin-table td{display:block;width:100%}
-  .admin-table tr{
-    background:var(--bg-elevated);border:1px solid var(--border);
-    border-radius:10px;margin-bottom:10px;padding:6px 4px;
-  }
-  .admin-table td{
-    display:flex;align-items:center;justify-content:space-between;gap:12px;
-    border-bottom:1px solid var(--border);text-align:left;
-  }
-  .admin-table tr td:last-child{border-bottom:none}
-  .admin-table td::before{
-    content:attr(data-label);
-    font-size:0.7rem;font-weight:700;color:var(--text3);
-    text-transform:uppercase;letter-spacing:0.4px;flex-shrink:0;
-  }
-  .admin-cell-title{max-width:60%;text-align:left}
+  /* Download card actions also need real thumb-sized touch targets */
+  .dl-btn{min-height:40px;padding:0 14px}
+  .dl-actions{gap:8px}
+  .dl-thumb{width:80px;height:52px}
 
-  .toast-wrap{left:12px;right:12px;max-width:none}
+  .toast-wrap{
+    left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));
+    max-width:none;
+  }
 }
 
 /* Standard phone */
@@ -992,7 +986,7 @@ select.field-input{cursor:pointer}
 
 /* Extra-small phone */
 @media (max-width:374px){
-  .app{padding:20px 10px 48px}
+  .app{padding-top:20px;padding-bottom:48px;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right))}
   .header-btns{gap:6px}
   .header-btns .btn{padding:9px 10px}
   .pv-thumb,.pv-loading .pv-thumb{height:140px}

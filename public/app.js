@@ -1,26 +1,22 @@
 /* ══ Theme Logic ══════════════════════════════════════════════════════════════ */
 const THEME_KEY = 'vdl-theme';
 
-function applyTheme(theme) {
+function setThemeAttribute(theme) {
   if (theme === 'dark' || theme === 'light') {
     document.documentElement.setAttribute('data-theme', theme);
   } else {
     document.documentElement.removeAttribute('data-theme');
   }
-  wiggleTheme();
 }
 
-function wiggleTheme() {
-  document.body.classList.remove('theme-wiggle');
-  void document.body.offsetWidth;
-  document.body.classList.add('theme-wiggle');
-  setTimeout(() => document.body.classList.remove('theme-wiggle'), 700);
+function applyTheme(theme) {
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (document.startViewTransition && !reduceMotion) {
+    document.startViewTransition(() => setThemeAttribute(theme));
+  } else {
+    setThemeAttribute(theme);
+  }
 }
-
-// System theme change only fires a wiggle when in "auto" mode
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-  if (!localStorage.getItem(THEME_KEY) || localStorage.getItem(THEME_KEY) === 'auto') wiggleTheme();
-});
 
 /* ══ Streaming Placeholder Animation ══*/
 function initStreamingPlaceholder() {
@@ -86,8 +82,7 @@ const state = {
   history:      {},          // sessionId → archived download
   filter:       'all',
   scope:        'active',
-  isAdmin:      false,
-  adminPass:    '',
+  lastStatus:   null,
   format:       localStorage.getItem('vdl-fmt') || 'video',
   quality:      JSON.parse(localStorage.getItem('vdl-quality') || '{}'),
   filters: {
@@ -180,7 +175,7 @@ const platforms = [
   { cls: 'fa-brands fa-x-twitter', re: /twitter\.com|x\.com/ },
   { cls: 'fa-brands fa-vimeo-v',   re: /vimeo\.com/ },
   { cls: 'fa-brands fa-twitch',    re: /twitch\.tv/ },
-  { cls: 'fa-solid fa-film',       re: /dailymotion\.com|pornhub\.com/ },
+  { cls: 'fa-solid fa-film',       re: /dailymotion\.com/ },
 ];
 function detectPlatform(url) {
   for (const p of platforms) if (p.re.test(url)) return p.cls;
@@ -396,6 +391,22 @@ function renderPreviewReady(pv) {
     icon.style.display = '';
   }
   el.querySelector('.pv-title').textContent = m.title;
+
+  if (m.kind === 'file') {
+    // Direct file / archive: no video vs audio choice, no quality ladder.
+    pv.format = 'file';
+    icon.style.display = '';
+    img.style.display = 'none';
+    icon.innerHTML = '<i class="fa-solid fa-box-archive"></i>';
+    const partsTxt = m.parts && m.parts.length > 1 ? `${m.parts.length} بخش` : '';
+    const sizeTxt  = m.size ? formatBytes(m.size) : '';
+    el.querySelector('.pv-meta').textContent = [m.uploader, sizeTxt, partsTxt].filter(Boolean).join(' • ');
+    el.querySelector('.seg-control').style.display = 'none';
+    el.querySelector('.quality-sel').style.display = 'none';
+    el.dataset.state = 'ready';
+    return;
+  }
+
   const dur = m.duration ? `${Math.floor(m.duration / 60)}m ${m.duration % 60}s` : '';
   el.querySelector('.pv-meta').textContent = [m.extractor, m.uploader, dur].filter(Boolean).join(' • ');
   updateCardFormat(pv);
@@ -448,13 +459,18 @@ async function startPreviewDownload(pid) {
   btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>در حال شروع…</span>';
 
   try {
-    const res = await api('/api/download', {
+    const payload = {
       url:     pv.meta.webpage_url,
       title:   pv.meta.title,
       thumb:   pv.meta.thumb,
       format:  pv.format,
-      quality: sel.value,
-    });
+      quality: sel ? sel.value : '',
+    };
+    if (pv.format === 'file') {
+      payload.fileName = pv.meta.fileName;
+      payload.parts    = pv.meta.parts || [];
+    }
+    const res = await api('/api/download', payload);
     if (!res.ok) throw new Error(res.error);
     toast('<i class="fa-solid fa-rocket"></i> دانلود شروع شد');
     removePreview(pid);             // frees a capacity slot, re-enables search bar
@@ -534,8 +550,6 @@ function getPlatformKey(url) {
     if (host.includes('vimeo.com')) return 'vimeo';
     if (host.includes('twitch.tv')) return 'twitch';
     if (host.includes('dailymotion.com')) return 'dailymotion';
-    if (host.includes('pornhub.com')) return 'pornhub';
-    if (host.includes('xhamster.com')) return 'xhamster';
     return 'other';
   } catch { return 'other'; }
 }
@@ -547,11 +561,11 @@ function updateFilterBadges() {
     const btn=document.querySelector(`.filter-nav-item[data-filter="${s}"][data-type="status"]`);
     if(btn){const c=source.filter(d=>s==='all'||d.status===s).length;btn.querySelector('.filter-badge').textContent=c;}
   });
-  ['all','video','audio'].forEach(f=>{
+  ['all','video','audio','file'].forEach(f=>{
     const btn=document.querySelector(`.filter-nav-item[data-filter="${f}"][data-type="format"]`);
     if(btn){const c=source.filter(d=>f==='all'||d.format===f).length;btn.querySelector('.filter-badge').textContent=c;}
   });
-  ['all','youtube','tiktok','instagram','twitter','vimeo','twitch','dailymotion','pornhub','xhamster'].forEach(p=>{
+  ['all','youtube','tiktok','instagram','twitter','vimeo','twitch','dailymotion','other'].forEach(p=>{
     const btn=document.querySelector(`.filter-nav-item[data-filter="${p}"][data-type="platform"]`);
     if(btn){const c=source.filter(d=>p==='all'||getPlatformKey(d.url||'')===p).length;btn.querySelector('.filter-badge').textContent=c;}
   });
@@ -635,7 +649,7 @@ function renderDownloads() {
         ? 'تاریخچه‌ای پیدا نشد'
         : 'دانلود فعالی پیدا نشد';
     const emptyText = !hasAnyData
-      ? 'یک لینک ویدئو بالا وارد کن'
+      ? 'یک لینک ویدئو، صوت یا فایل بالا وارد کن'
       : state.scope === 'history'
         ? 'با این فیلتر هنوز موردی در تاریخچه ثبت نشده'
         : 'یا همه دانلودها تمام شده‌اند یا فیلتر دیگری انتخاب کن';
@@ -669,7 +683,9 @@ function metaHtml(dl) {
   return `
         <span class="dl-badge badge-${dl.status}">${statusLabel[dl.status] || dl.status}</span>
         ${sizeStr  ? `<span class="dl-size">${sizeStr}</span>` : ''}
-        ${dl.format === 'audio' ? '<span class="dl-size"><i class="fa-solid fa-music"></i> MP3</span>' : ''}`;
+        ${dl.format === 'audio' ? '<span class="dl-size"><i class="fa-solid fa-music"></i> MP3</span>' : ''}
+        ${dl.format === 'file' ? '<span class="dl-size"><i class="fa-solid fa-box-archive"></i> فایل</span>' : ''}
+        ${dl.partCount > 1 ? `<span class="dl-size">بخش ${dl.partIndex}/${dl.partCount}</span>` : ''}`;
 }
 
 function progStatsHtml(dl) {
@@ -904,9 +920,11 @@ document.querySelectorAll('.theme-btn').forEach(btn => {
 
 $('settingsBtn').addEventListener('click', async () => {
   const cfg = await api('/api/config');
-  $('cfgFolder').value    = cfg.downloadFolder || '';
-  $('cfgProxy').value     = cfg.proxy          || '';
-  $('cfgOrganize').checked = cfg.organizeByType !== false; // default on
+  $('cfgFolder').value      = cfg.downloadFolder || '';
+  $('cfgProxy').value       = cfg.proxy          || '';
+  $('cfgOrganize').checked  = cfg.organizeByType !== false; // default on
+  $('cfgCookiesFrom').value = cfg.cookiesFrom    || 'none';
+  $('cfgCookiesFile').value = cfg.cookiesFile    || '';
 
   // Highlight active theme button
   const currentTheme = localStorage.getItem(THEME_KEY) || 'auto';
@@ -925,6 +943,8 @@ $('settingsSave').addEventListener('click', async () => {
     downloadFolder: $('cfgFolder').value.trim(),
     proxy:          $('cfgProxy').value.trim(),
     organizeByType: $('cfgOrganize').checked,
+    cookiesFrom:    $('cfgCookiesFrom').value,
+    cookiesFile:    $('cfgCookiesFile').value.trim(),
   });
   $('settingsOverlay').classList.remove('show');
   toast('<i class="fa-solid fa-check"></i> تنظیمات ذخیره شد');
@@ -947,27 +967,15 @@ $('proxyTestBtn').addEventListener('click', async () => {
   } catch { result.className = 'proxy-result proxy-err'; result.textContent = '❌ خطای شبکه'; }
 });
 
-/* ══ Admin Panel ══════════════════════════════════════════════════════════════ */
-$('adminBtn').addEventListener('click', () => {
-  const pass = prompt('رمز عبور مدیریت:');
-  if (!pass) return;
-  state.adminPass = pass;
-  loadAdmin();
-});
-
-$('adminCloseBtn').addEventListener('click', () => {
-  $('adminPanel').classList.remove('show');
-  $('mainView').style.display = '';
-  state.isAdmin = false;
-});
-
-async function loadAdmin() {
+/* ══ Status Panel ═══════════════════════════════════════════════════════════
+   No login gate — this is just a monitoring view. The status is fetched as
+   soon as the app loads so the DB/uptime check has already happened by the
+   time the user opens the tab. ══════════════════════════════════════════════ */
+async function refreshStatus() {
   try {
-    const res = await api('/api/admin/stats', undefined, { 'Authorization': state.adminPass });
+    const res = await api('/api/status');
     if (!res.ok) throw new Error(res.error);
-    state.isAdmin = true;
-    $('mainView').style.display  = 'none';
-    $('adminPanel').classList.add('show');
+    state.lastStatus = res;
 
     const s = res.stats;
     $('aStatTotal').textContent  = s.totalDownloads;
@@ -976,32 +984,37 @@ async function loadAdmin() {
     $('aStatErrors').textContent = s.errors;
     $('aStatUptime').textContent = s.uptime;
 
-    $('adminTbody').innerHTML = (s.queue || []).map(dl => `
-      <tr>
-        <td data-label="#" style="color:var(--text3)">${dl.id}</td>
-        <td data-label="عنوان" class="admin-cell-title" title="${esc(dl.title)}">${esc(dl.title)}</td>
-        <td data-label="پلتفرم">${platformIconHtml(dl.url)}</td>
-        <td data-label="فرمت"><span class="admin-chip">${dl.format === 'video' ? 'ویدئو' : 'صدا'}</span></td>
-        <td data-label="کیفیت">${dl.quality || '—'}</td>
-        <td data-label="وضعیت"><span class="dl-badge badge-${dl.status}">${statusLabel[dl.status] || dl.status}</span></td>
-        <td data-label="عمل">
-          ${['downloading','finalizing','queued'].includes(dl.status)
-            ? `<button class="btn btn-danger admin-cancel-btn" onclick="adminCancel(${dl.id})"><i class="fa-solid fa-xmark"></i> لغو</button>`
-            : '—'}
-        </td>
-      </tr>
-    `).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px">صف خالیه 🎉</td></tr>';
+    const dbEl = $('aStatDb');
+    if (!res.db.enabled) {
+      dbEl.textContent = 'غیرفعال';
+      dbEl.className = 'admin-stat-value';
+    } else if (res.db.connected) {
+      dbEl.textContent = 'متصل';
+      dbEl.className = 'admin-stat-value success';
+    } else {
+      dbEl.textContent = 'قطع';
+      dbEl.className = 'admin-stat-value error';
+    }
   } catch (e) {
-    alert('دسترسی مدیریت ناموفق بود: ' + e.message);
+    $('aStatDb').textContent = 'نامشخص';
   }
 }
 
-window.adminCancel = async id => {
-  await api('/api/admin/cancel', { id }, { 'Authorization': state.adminPass });
-  await loadAdmin();
-};
+$('statusBtn').addEventListener('click', () => {
+  $('mainView').style.display  = 'none';
+  $('statusPanel').classList.add('show');
+  refreshStatus();
+});
 
-/* ══ Admin Update Logic ══════════════════════════════════════════════════════ */
+$('statusCloseBtn').addEventListener('click', () => {
+  $('statusPanel').classList.remove('show');
+  $('mainView').style.display = '';
+});
+
+// Check system/DB status right away, before the user ever opens the tab.
+refreshStatus();
+
+/* ══ Core Update Logic ═══════════════════════════════════════════════════════ */
 async function performYtdlpUpdate(master = false) {
   const btn = master ? $('updateYtdlpMasterBtn') : $('updateYtdlpBtn');
   const status = $('updateStatus');
@@ -1013,7 +1026,7 @@ async function performYtdlpUpdate(master = false) {
   status.style.color = 'var(--accent)';
 
   try {
-    const res = await api('/api/admin/update-ytdlp', { master }, { 'Authorization': state.adminPass });
+    const res = await api('/api/update-ytdlp', { master });
     if (!res.ok) throw new Error(res.error);
     status.textContent = `نسخه جدید: ${res.version}`;
     status.style.color = 'var(--success)';

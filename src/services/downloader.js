@@ -2,6 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+const https = require('https');
 const { spawn } = require('child_process');
 const { getYtdlpPath } = require('../utils/helpers');
 const { loadConfig } = require('./config');
@@ -18,9 +20,14 @@ function hostnameOf(url) {
   }
 }
 
-function isXHamsterUrl(url) {
+// Strip characters that are illegal in filenames across Windows/macOS/Linux.
+function sanitizeFileName(name) {
+  return String(name || 'file').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 200) || 'file';
+}
+
+function isYoutubeUrl(url) {
   const host = hostnameOf(url);
-  return host === 'xhamster.com' || host.endsWith('.xhamster.com');
+  return host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtu.be';
 }
 
 const store = {
@@ -42,12 +49,10 @@ function broadcast(data) {
 
 function buildCommonArgs(cfg, url) {
   const c = cfg || loadConfig();
-  const xhamster = isXHamsterUrl(url);
   const args = [
     '--user-agent', USER_AGENT,
     '--add-header', 'Accept-Language:en-US,en;q=0.9',
     '--add-header', 'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    '--add-header', `Referer:${xhamster ? 'https://xhamster.com/' : 'https://www.google.com/'}`,
     '--socket-timeout', '60',
     '--retries', '10',
     '--fragment-retries', '10',
@@ -56,18 +61,18 @@ function buildCommonArgs(cfg, url) {
     '--geo-bypass',
     '--no-check-certificates',
   ];
-  if (!xhamster) args.push('--prefer-free-formats');
-  if (xhamster) {
-    args.push(
-      '--add-header', 'Origin:https://xhamster.com',
-      '--add-header', 'Cookie:xhamster_age_verified=1; age_verified=1; is_age_verified=1'
-    );
-  }
-  if (url && url.includes('pornhub.com')) {
-    args.push('--add-header', 'Cookie:age_verified=1');
-  }
+  // Many extractors gate content behind a one-click "I am over 18" interstitial.
+  // yt-dlp clears that itself; --age-limit tells it not to skip such entries.
+  args.push('--age-limit', '99', '--prefer-free-formats');
+  const hasCookies = (c.cookiesFrom && c.cookiesFrom !== 'none') || (c.cookiesFile && fs.existsSync(c.cookiesFile));
   if (c.cookiesFrom && c.cookiesFrom !== 'none') args.push('--cookies-from-browser', c.cookiesFrom);
   if (c.cookiesFile && fs.existsSync(c.cookiesFile))  args.push('--cookies', c.cookiesFile);
+  // Without cookies, YouTube frequently throws "Sign in to confirm you're not a bot"
+  // on the default web client. The android/tv embedded clients don't require that
+  // check for most public videos, so try them first and only fall back to web.
+  if (isYoutubeUrl(url) && !hasCookies) {
+    args.push('--extractor-args', 'youtube:player_client=android,tv,web');
+  }
   if (c.proxy) args.push('--proxy', c.proxy);
   return args;
 }
@@ -124,6 +129,10 @@ function createDownload(payload) {
     thumb: payload.thumb || '',
     format: payload.format || 'video',
     quality: payload.quality || '',
+    fileName: payload.fileName || '',
+    partIndex: payload.partIndex || 0,
+    partCount: payload.partCount || 0,
+    groupId: payload.groupId || '',
     status: 'queued',
     progress: 0,
     speed: '',
@@ -149,22 +158,31 @@ function startDownload(id) {
 
   const cfg        = loadConfig();
   const today      = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-  const typeDir    = dl.format === 'audio' ? 'Music' : 'Video';
+  const typeDir    = dl.format === 'audio' ? 'Music' : dl.format === 'file' ? 'Files' : 'Video';
   const folder     = cfg.organizeByType !== false
     ? path.join(cfg.downloadFolder, typeDir, today)
     : cfg.downloadFolder;
   fs.mkdirSync(folder, { recursive: true });
 
+  // For a direct file (archive, document, image, installer…) keep the server's
+  // real filename; otherwise let yt-dlp template the media title.
+  const outTemplate = dl.format === 'file' && dl.fileName
+    ? path.join(folder, sanitizeFileName(dl.fileName))
+    : path.join(folder, '%(title).100s.%(ext)s');
+
   const args = [
     '--no-playlist', '--newline', '--progress',
     '--continue', // resume/repair partial .part files instead of restarting
     ...buildCommonArgs(cfg, dl.url),
-    '-o', path.join(folder, '%(title).100s.%(ext)s'),
+    '-o', outTemplate,
   ];
 
   if (dl.format === 'audio') {
     const abr = dl.quality ? dl.quality.replace('kbps', '') : '128';
     args.push('-f', 'bestaudio/best', '-x', '--audio-format', 'mp3', '--audio-quality', abr, '--no-keep-video');
+  } else if (dl.format === 'file') {
+    // Direct HTTP download — no format selection, no post-processing.
+    args.push('--no-check-formats');
   } else {
     const height = dl.quality ? dl.quality.replace('p', '') : '480';
     args.push(
@@ -283,12 +301,16 @@ function startDownload(id) {
       store.stats.errors++;
       const errLine = stderrBuf.split('\n').filter(l => l.includes('ERROR:') || l.includes('Postprocessing')).pop() || '';
       dl.errorMsg = errLine.replace(/^.*(?:ERROR|Postprocessing):\s*/, '').trim().substring(0, 150);
-      if (isXHamsterUrl(dl.url) && /No video formats found/i.test(dl.errorMsg)) {
-        dl.errorMsg = 'XHamster returned no formats. Use browser cookies in settings and run bin\\yt-dlp.exe -U.';
+      if (/No video formats found|Unsupported URL|Requested format is not available/i.test(dl.errorMsg)) {
+        dl.errorMsg = 'منبع پاسخ نداد یا فرمت در دسترس نیست. کوکی مرورگر را در تنظیمات فعال کن و هسته را از بخش «وضعیت» به‌روزرسانی کن.';
+      }
+      if (/Sign in to confirm|not a bot/i.test(dl.errorMsg)) {
+        dl.errorMsg = 'منبع درخواست تایید هویت کرده. از بخش تنظیمات، کوکی مرورگری که در آن لاگین هستی را انتخاب کن و دوباره تلاش کن.';
+      }
+      if (/ffmpeg|ffprobe/i.test(dl.errorMsg)) {
+        dl.errorMsg = 'ffmpeg نصب نیست. راهنمای نصب در README پروژه.';
       }
       addLog(`خطا در عملیات: ${dl.errorMsg}`, 'error');
-      if (dl.errorMsg.includes('ffmpeg') || dl.errorMsg.includes('ffprobe'))
-        dl.errorMsg = 'ffmpeg نصب نیست — winget install ffmpeg';
     }
 
     if (isHistoryStatus(dl.status)) {
@@ -315,7 +337,7 @@ module.exports = {
   syncHistory,
   isActiveStatus,
   isHistoryStatus,
-  isXHamsterUrl,
+  sanitizeFileName,
   startDownload,
   USER_AGENT
 };

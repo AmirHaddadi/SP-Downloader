@@ -1,23 +1,40 @@
 {
   "name": "sp-downloader",
-  "version": "1.0.0",
-  "description": "A simple local video downloader UI backed by yt-dlp.",
+  "version": "2.0.0",
+  "description": "Free & open-source self-hosted download manager. Pulls video (MP4), audio (MP3) and direct files (including multi-part archives) from any source yt-dlp supports, with history, data separation and proxy support.",
   "main": "src/server.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node src/server.js",
     "update-core": "node update-ytdlp.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test/run.js"
   },
   "keywords": [
     "yt-dlp",
-    "video",
-    "downloader",
-    "vd1",
-    "sp-downloader"
+    "video-downloader",
+    "audio-downloader",
+    "download-manager",
+    "mp3",
+    "mp4",
+    "self-hosted",
+    "open-source",
+    "proxy",
+    "pwa"
   ],
-  "author": "SP Downloader",
-  "license": "ISC",
+  "author": "Amir Haddadi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AmirHaddadi/SP-Downloader.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AmirHaddadi/SP-Downloader/issues"
+  },
+  "homepage": "https://github.com/AmirHaddadi/SP-Downloader#readme",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "dotenv": "^17.4.2",
     "mongodb": "^7.3.0"

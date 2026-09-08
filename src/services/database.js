@@ -75,10 +75,23 @@ function isDatabaseEnabled() {
   return state.enabled;
 }
 
+async function pingDatabase() {
+  if (!state.enabled) return false;
+  try {
+    if (!state.ready) await initDatabase();
+    if (!state.client) return false;
+    await state.client.db().command({ ping: 1 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   initDatabase,
   getHistoryCollection,
   isDatabaseEnabled,
+  pingDatabase,
   getMongoUri,
   getDatabaseName,
   getCollectionName,

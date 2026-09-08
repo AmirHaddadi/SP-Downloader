@@ -1,5 +1,31 @@
-claude.exe
-.claude/
-.vscode/
+# Dependencies
 node_modules/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local runtime config written to the user's home is never in-repo,
+# but ignore a local copy too if present.
+.vdl_config.json
+.vdl_history.json
+
+# yt-dlp / ffmpeg binaries are fetched per-platform via `npm run update-core`
 bin/
+!bin/.gitkeep
+
+# Editor / tooling
+.vscode/
+.idea/
+.DS_Store
+*.log
+
+# Claude Code workspace
+.claude/
+
+# Internal working notes (not part of the public project)
+MDS/
+
+# Build / OS junk
+Thumbs.db

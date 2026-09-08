@@ -5,6 +5,7 @@ const path = require('path');
 const { spawn, execFile } = require('child_process');
 const { ytdlpExec, downloadFile, YTDLP_BIN, BIN_DIR } = require('../utils/helpers');
 const { loadConfig, saveConfig } = require('../services/config');
+const { isDatabaseEnabled, pingDatabase } = require('../services/database');
 const {
   store,
   broadcast,
@@ -21,19 +22,41 @@ const {
   findDownloadHistory,
   removeDownloadHistory,
 } = require('../models/download-history');
+const { looksLikeFileUrl, probeUrl, detectParts } = require('../services/file-probe');
 
-const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'admin123';
+// Build the `meta` payload for a URL that points straight at a downloadable file
+// (archive, installer, document, image…) rather than a media page. Multi-part
+// archives (file.part1.rar, file.7z.001, file.z01…) are enumerated so the whole
+// set downloads as one group.
+async function buildFileMeta(url) {
+  const info = await probeUrl(url);
+  let parts = [];
+  try { parts = await detectParts(url); } catch { parts = []; }
+
+  const totalSize = parts.length
+    ? parts.reduce((sum, p) => sum + (p.size || 0), 0)
+    : (info.size || 0);
+
+  return {
+    kind:        'file',
+    title:       info.fileName,
+    fileName:    info.fileName,
+    thumb:       '',
+    duration:    0,
+    uploader:    (() => { try { return new URL(url).hostname; } catch { return ''; } })(),
+    extractor:   'direct',
+    webpage_url: info.finalUrl || url,
+    size:        totalSize,
+    parts:       parts.map(p => ({ url: p.url, fileName: p.fileName, size: p.size })),
+    videoQualities: [],
+    audioQualities: [],
+  };
+}
 
 function json(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(obj));
-}
-
-function requireAdmin(req, res) {
-  if (req.headers['authorization'] !== ADMIN_PASS) {
-    json(res, 401, { ok: false, error: 'Unauthorized' });
-    return false;
-  }
+  // Returned so callers can `return json(...)` to signal the request was handled.
   return true;
 }
 
@@ -109,7 +132,19 @@ async function handleApi(req, res, pathname, u) {
     try {
       const { url } = JSON.parse(await readBody(req));
       if (!url || !url.match(/^https?:\/\//i)) throw new Error('URL نامعتبر است');
-      
+
+      // Direct-file URLs (archives, installers, documents, images, fonts…) skip
+      // yt-dlp entirely — probe the server for name/size and any sibling parts.
+      if (looksLikeFileUrl(url)) {
+        try {
+          const meta = await buildFileMeta(url);
+          json(res, 200, { ok: true, meta });
+          return true;
+        } catch {
+          // Probe failed — fall through and let yt-dlp try as a media page.
+        }
+      }
+
       const cfg = loadConfig();
       const args = [
         '--dump-json', '--no-playlist', '--skip-download',
@@ -146,9 +181,27 @@ async function handleApi(req, res, pathname, u) {
   // ── /api/download ─────────────────────────────────────────────────────────
   if (pathname === '/api/download' && req.method === 'POST') {
     try {
-      const { url, title, thumb, format, quality } = JSON.parse(await readBody(req));
+      const { url, title, thumb, format, quality, fileName, parts } = JSON.parse(await readBody(req));
       if (!url?.match(/^https?:\/\//i)) return json(res, 400, { ok: false, error: 'URL نامعتبر' });
-      const dl = createDownload({ url, title, thumb, format, quality });
+
+      // Multi-part archive set → one grouped download per part, all sharing a groupId.
+      if (format === 'file' && Array.isArray(parts) && parts.length > 1) {
+        const groupId = `grp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const created = parts
+          .filter(p => p && /^https?:\/\//i.test(p.url))
+          .map((p, i) => {
+            const dl = createDownload({
+              url: p.url, title: p.fileName || `${title || fileName} (${i + 1})`,
+              thumb: '', format: 'file', fileName: p.fileName,
+              partIndex: i + 1, partCount: parts.length, groupId,
+            });
+            return dl;
+          });
+        created.forEach(dl => startDownload(dl.id));
+        return json(res, 200, { ok: true, groupId, ids: created.map(d => d.id), sessionIds: created.map(d => d.sessionId) });
+      }
+
+      const dl = createDownload({ url, title, thumb, format, quality, fileName });
       startDownload(dl.id);
       json(res, 200, { ok: true, id: dl.id, sessionId: dl.sessionId });
     } catch (e) { json(res, 400, { ok: false, error: e.message }); }
@@ -189,6 +242,10 @@ async function handleApi(req, res, pathname, u) {
         thumb:     hist.thumb,
         format:    hist.format,
         quality:   hist.quality,
+        fileName:  hist.fileName,
+        partIndex: hist.partIndex,
+        partCount: hist.partCount,
+        groupId:   hist.groupId,
         sessionId: hist.sessionId,
       });
       startDownload(dl.id);
@@ -334,11 +391,12 @@ async function handleApi(req, res, pathname, u) {
     return true;
   }
 
-  // ── /api/admin/stats ──────────────────────────────────────────────────────
-  if (pathname === '/api/admin/stats' && req.method === 'GET') {
-    if (!requireAdmin(req, res)) return true;
+  // ── /api/status ───────────────────────────────────────────────────────────
+  if (pathname === '/api/status' && req.method === 'GET') {
     const allDl = Array.from(store.downloads.values()).map(sanitize);
     const uptimeSec = Math.floor((Date.now() - store.stats.startTime) / 1000);
+    const dbEnabled = isDatabaseEnabled();
+    const dbConnected = dbEnabled ? await pingDatabase() : false;
     json(res, 200, {
       ok: true,
       stats: {
@@ -346,37 +404,14 @@ async function handleApi(req, res, pathname, u) {
         activeCount: allDl.filter(d => ['downloading', 'finalizing'].includes(d.status)).length,
         queuedCount: allDl.filter(d => d.status === 'queued').length,
         uptime:      `${Math.floor(uptimeSec/3600)}h ${Math.floor((uptimeSec%3600)/60)}m`,
-        queue:       allDl.sort((a, b) => b.id - a.id),
       },
+      db: { enabled: dbEnabled, connected: dbConnected },
     });
     return true;
   }
 
-  // ── /api/admin/cancel ─────────────────────────────────────────────────────
-  if (pathname === '/api/admin/cancel' && req.method === 'POST') {
-    if (!requireAdmin(req, res)) return true;
-    const { id } = JSON.parse(await readBody(req));
-    const dl = getActiveDownload({ id });
-    if (dl) {
-      dl.status = 'cancelled';
-      dl.completedAt = Date.now();
-      if (dl.proc) {
-        stopDownloadProcess(dl);
-        emitDownloadUpdate(dl);
-        await syncHistory(dl);
-      } else {
-        await syncHistory(dl);
-        broadcast({ type: 'history-upsert', download: sanitize(dl) });
-        removeActiveDownload(dl.id);
-      }
-    }
-    json(res, 200, { ok: true });
-    return true;
-  }
-
-  // ── /api/admin/update-ytdlp ───────────────────────────────────────────────
-  if (pathname === '/api/admin/update-ytdlp' && req.method === 'POST') {
-    if (!requireAdmin(req, res)) return true;
+  // ── /api/update-ytdlp ──────────────────────────────────────────────────────
+  if (pathname === '/api/update-ytdlp' && req.method === 'POST') {
     try {
       const { master } = JSON.parse(await readBody(req));
       if (!fs.existsSync(BIN_DIR)) fs.mkdirSync(BIN_DIR);

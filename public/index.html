@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>SP Downloader — دانلودر ویدئو</title>
+<title>SP Downloader — دانلود از هر منبع</title>
 <script>(function(){var t=localStorage.getItem('vdl-theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);})()</script>
 <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg">
 <link rel="icon" type="image/png" sizes="96x96" href="/favicon/favicon-96x96.png">
@@ -29,7 +29,7 @@
       </div>
     </div>
     <div class="header-btns">
-      <button class="btn btn-ghost" id="adminBtn"><i class="fa-solid fa-user-shield"></i><span>مدیریت</span></button>
+      <button class="btn btn-ghost" id="statusBtn"><i class="fa-solid fa-gauge-high"></i><span>وضعیت</span></button>
       <button class="btn btn-ghost" id="folderBtn"><i class="fa-solid fa-folder-open"></i><span>پوشه</span></button>
       <button class="btn btn-ghost" id="settingsBtn"><i class="fa-solid fa-gear"></i><span>تنظیمات</span></button>
     </div>
@@ -40,7 +40,7 @@
     <div class="search-bar" id="searchBar">
       <span class="platform-icon" id="platformIcon"><i class="fa-solid fa-link"></i></span>
       <input class="url-input" id="urlInput" type="text" autocomplete="off" spellcheck="false"
-             placeholder="لینک ویدئو را وارد کنید و Enter بزنید…">
+             placeholder="لینک ویدئو، صوت یا فایل را وارد کنید و Enter بزنید…">
       <button class="btn btn-primary" id="addBtn"><i class="fa-solid fa-plus"></i><span>افزودن</span></button>
     </div>
     <div class="search-hint" id="searchHint"></div>
@@ -85,6 +85,7 @@
         <button class="filter-nav-item active" data-filter="all" data-type="format"><i class="fa-solid fa-file"></i><span>همه</span><span class="filter-badge">0</span></button>
         <button class="filter-nav-item" data-filter="video" data-type="format"><i class="fa-solid fa-film"></i><span>ویدئو</span><span class="filter-badge">0</span></button>
         <button class="filter-nav-item" data-filter="audio" data-type="format"><i class="fa-solid fa-music"></i><span>صوت</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="file" data-type="format"><i class="fa-solid fa-box-archive"></i><span>فایل</span><span class="filter-badge">0</span></button>
       </div>
       <div class="filter-group" id="platformFilters">
         <button class="filter-nav-item active" data-filter="all" data-type="platform"><i class="fa-solid fa-film"></i><span>همه</span><span class="filter-badge">0</span></button>
@@ -95,8 +96,7 @@
         <button class="filter-nav-item" data-filter="vimeo" data-type="platform"><i class="fa-solid fa-film"></i><span>Vimeo</span><span class="filter-badge">0</span></button>
         <button class="filter-nav-item" data-filter="twitch" data-type="platform"><i class="fa-solid fa-film"></i><span>Twitch</span><span class="filter-badge">0</span></button>
         <button class="filter-nav-item" data-filter="dailymotion" data-type="platform"><i class="fa-solid fa-film"></i><span>Dailymotion</span><span class="filter-badge">0</span></button>
-        <button class="filter-nav-item" data-filter="pornhub" data-type="platform"><i class="fa-solid fa-film"></i><span>PornHub</span><span class="filter-badge">0</span></button>
-        <button class="filter-nav-item" data-filter="xhamster" data-type="platform"><i class="fa-solid fa-film"></i><span>XHamster</span><span class="filter-badge">0</span></button>
+        <button class="filter-nav-item" data-filter="other" data-type="platform"><i class="fa-solid fa-globe"></i><span>سایر منابع</span><span class="filter-badge">0</span></button>
       </div>
     </div>
 
@@ -104,17 +104,17 @@
       <div class="empty">
         <span class="empty-icon"><i class="fa-solid fa-inbox"></i></span>
         <strong>هیچ دانلودی نیست</strong>
-        <p>یک لینک ویدئو بالا وارد کن</p>
+        <p>یک لینک بالا وارد کن</p>
       </div>
     </div>
   </div>
 
-  <!-- ═══ Admin Panel ══════════════════════════════════════════════════════════ -->
-  <div class="admin-panel" id="adminPanel">
+  <!-- ═══ Status Panel ═══════════════════════════════════════════════════════ -->
+  <div class="admin-panel" id="statusPanel">
     <div style="margin-bottom:24px">
       <div class="admin-head">
-        <h2 class="admin-head-title"><i class="fa-solid fa-chart-line"></i> داشبورد مدیریت</h2>
-        <button class="btn btn-ghost" id="adminCloseBtn"><i class="fa-solid fa-arrow-right"></i><span>بازگشت</span></button>
+        <h2 class="admin-head-title"><i class="fa-solid fa-gauge-high"></i> وضعیت سیستم</h2>
+        <button class="btn btn-ghost" id="statusCloseBtn"><i class="fa-solid fa-arrow-right"></i><span>بازگشت</span></button>
       </div>
       <div class="admin-grid">
         <div class="admin-stat">
@@ -137,13 +137,17 @@
           <div class="admin-stat-label">زمان فعالیت</div>
           <div class="admin-stat-value" id="aStatUptime">—</div>
         </div>
+        <div class="admin-stat">
+          <div class="admin-stat-label">دیتابیس</div>
+          <div class="admin-stat-value" id="aStatDb">—</div>
+        </div>
       </div>
 
       <!-- Core Update Section -->
       <div class="admin-update">
         <div class="admin-update-info">
           <h3><i class="fa-solid fa-screwdriver-wrench"></i> به‌روزرسانی هسته (yt-dlp)</h3>
-          <p>اگر دانلودی با خطا مواجه شد (مثل No video formats found)، هسته را آپدیت کنید.</p>
+          <p>اگر دانلودی با خطا مواجه شد (مثل No video formats found یا Sign in to confirm)، هسته را آپدیت کنید.</p>
         </div>
         <div class="admin-update-actions">
           <button class="btn btn-ghost" id="updateYtdlpBtn"><i class="fa-solid fa-rotate"></i><span>نسخه پایدار</span></button>
@@ -151,17 +155,6 @@
         </div>
       </div>
       <div id="updateStatus" class="admin-update-status"></div>
-
-      <div class="admin-table-wrap">
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>#</th><th>عنوان</th><th>پلتفرم</th><th>فرمت</th><th>کیفیت</th><th>وضعیت</th><th>عمل</th>
-            </tr>
-          </thead>
-          <tbody id="adminTbody"></tbody>
-        </table>
-      </div>
     </div>
   </div>
 </div>
@@ -195,6 +188,20 @@
           <span class="toggle-label">تفکیک موسیقی و ویدئو بر اساس تاریخ</span>
         </label>
         <div class="field-hint">دانلودها در زیرپوشه‌های <code>Video\YYYY-MM-DD</code> و <code>Music\YYYY-MM-DD</code> ذخیره می‌شن</div>
+      </div>
+      <div class="field-group">
+        <div class="field-label"><i class="fa-solid fa-cookie-bite"></i> کوکی مرورگر <span class="field-label-opt">(رفع خطای «Sign in to confirm»)</span></div>
+        <select class="field-input" id="cfgCookiesFrom">
+          <option value="none">استفاده نشود</option>
+          <option value="chrome">Chrome</option>
+          <option value="edge">Edge</option>
+          <option value="firefox">Firefox</option>
+          <option value="brave">Brave</option>
+          <option value="opera">Opera</option>
+          <option value="vivaldi">Vivaldi</option>
+        </select>
+        <div class="field-hint">وقتی یوتیوب درخواست «Sign in to confirm you're not a bot» می‌ده، مرورگری که در اون لاگین هستی رو انتخاب کن. مرورگر باید بسته باشه.</div>
+        <input class="field-input" id="cfgCookiesFile" type="text" placeholder="یا مسیر فایل cookies.txt (اختیاری)" dir="ltr" style="margin-top:8px">
       </div>
       <div class="field-group">
         <div class="field-label"><i class="fa-solid fa-globe"></i> پروکسی <span class="field-label-opt">(اختیاری)</span></div>

@@ -74,10 +74,9 @@ const server = http.createServer(async (req, res) => {
 initDatabase()
   .then(() => {
     server.listen(PORT, () => {
-      console.log(`\n  ▶  VDL Pro running at http://localhost:${PORT}`);
+      console.log(`\n  ▶  SP Downloader  —  http://localhost:${PORT}`);
       console.log(`  Platform : ${process.platform}`);
-      console.log(`  Mode     : Production (Modular)`);
-      console.log(`  MongoDB  : ${isDatabaseEnabled() ? 'connected' : 'disabled'}\n`);
+      console.log(`  History  : ${isDatabaseEnabled() ? 'MongoDB' : 'local JSON file (~/.vdl_history.json)'}\n`);
     });
   })
   .catch((error) => {
